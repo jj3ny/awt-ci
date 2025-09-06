@@ -91,7 +91,7 @@ export async function gather(opts: {
 					sinceIso =
 						(await gh.getCommitDate({ owner, repo }, sha)) ||
 						new Date(0).toISOString();
-				const comments = await gh
+				let comments = await gh
 					.listCommentsSince(
 						{ owner, repo },
 						prNumber,
@@ -99,6 +99,21 @@ export async function gather(opts: {
 						cfg.maxRecentComments ?? 30,
 					)
 					.catch(() => []);
+				// If no comments found since the last push timestamp, widen the window
+				if (!comments || comments.length === 0) {
+					const lookbackDays = cfg.recentCommentsLookbackDays ?? 2;
+					const widenedSince = new Date(
+						Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
+					).toISOString();
+					comments = await gh
+						.listCommentsSince(
+							{ owner, repo },
+							prNumber,
+							widenedSince,
+							cfg.maxRecentComments ?? 30,
+						)
+						.catch(() => []);
+				}
 				const payload = await buildAgentPayload({
 					prNumber,
 					sha,
