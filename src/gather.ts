@@ -25,16 +25,23 @@ export async function gather(opts: {
 	const root = await repoRoot();
 	const repoBase = path.basename(root);
     const wtPath = repoRootForWorktree(repoBase, wt);
-    // Ensure the worktree path exists; this command is scoped to that worktree
+    const branchMode = !!opts.branch;
+    let wtExists = true;
     try {
         await fs.access(wtPath);
     } catch {
+        wtExists = false;
+    }
+    // If a remote branch is specified, do not require a worktree
+    if (!wtExists && !branchMode) {
         process.stderr.write(
             `Worktree '${wt}' not found at ${wtPath}. Create it or use --branch to target a remote branch.\n`,
         );
         process.exitCode = 1;
         return;
     }
+    // Choose context path for local file reads and tooling
+    const ctxPath = wtExists ? wtPath : root;
 
 	const cfgPath = path.join(root, ".awt", "config.jsonc");
 	const cfg = (await readJsonc<WatchConfig>(cfgPath)) || {};
@@ -57,9 +64,11 @@ export async function gather(opts: {
 	const ownerRepo =
 		cfg.owner && cfg.repo
 			? { owner: cfg.owner, repo: cfg.repo }
-			: await originOwnerRepo(wtPath).catch(async () => originOwnerRepo(root));
+			: await originOwnerRepo(ctxPath).catch(async () => originOwnerRepo(root));
 	const { owner, repo } = ownerRepo;
-    const branch = await currentBranch(wtPath).catch(() => "detached");
+    const branch = wtExists
+        ? await currentBranch(wtPath).catch(() => "detached")
+        : "detached";
     let prNumber: number | null = null;
     if (!opts.branch && branch && branch !== "detached") {
         prNumber = await gh
@@ -72,7 +81,7 @@ export async function gather(opts: {
     let sha: string | null = null;
     if (targetBranch) {
         sha =
-            (await remoteHeadSha(wtPath, targetBranch).catch(async () =>
+            (await remoteHeadSha(ctxPath, targetBranch).catch(async () =>
                 remoteHeadSha(root, targetBranch),
             )) || null;
         if (!sha) {
@@ -124,7 +133,7 @@ export async function gather(opts: {
 			);
 			if (bundle) {
 				const summary = await summarizeFailures(bundle, engine, {
-					cwd: wtPath,
+					cwd: ctxPath,
 					repo: { owner, repo },
 				});
 				// Determine remote push timestamp: earliest workflow run createdAt for this SHA
@@ -205,31 +214,51 @@ export async function gather(opts: {
 		} catch (_e) {
 			// Could not gather context (API or other failure)
 			text = `Unable to gather CI context for PR #${prNumber} on ${sha.slice(0, 7)}.`;
+			if (process.env.AWT_DEBUG) {
+				const msg = _e instanceof Error ? _e.stack || _e.message : String(_e);
+				process.stderr.write(`[awt-ci debug] ${msg}\n`);
+			}
 			isError = true;
 		}
     } else if (sha && targetBranch) {
 		// Branch-only mode: gather for latest CI failure on this branch
-		const ci = await gh
-			.latestCiForSha({ owner, repo }, sha)
+		let effectiveSha = sha;
+		let ci = await gh
+			.latestCiForSha({ owner, repo }, effectiveSha)
 			.catch(() => ({ conclusion: null, runs: [] }));
+		// If HEAD has no runs yet, fall back to the latest run's head_sha for the branch
+		if ((!ci.runs || ci.runs.length === 0) && opts.branch) {
+			try {
+				const lastRunSha = await gh.headShaForBranch(
+					{ owner, repo },
+					targetBranch,
+				);
+				if (lastRunSha && lastRunSha !== effectiveSha) {
+					effectiveSha = lastRunSha;
+					ci = await gh
+						.latestCiForSha({ owner, repo }, effectiveSha)
+						.catch(() => ({ conclusion: null, runs: [] }));
+				}
+			} catch {}
+		}
 		try {
 			const bundle = await gatherFailures(
 				{ owner, repo },
 				0, // sentinel: no PR
-				sha,
+				effectiveSha,
 				gh,
 				summarizePerJobKB,
 				summarizeTotalMB,
 			);
 			if (bundle) {
 				const summary = await summarizeFailures(bundle, engine, {
-					cwd: wtPath,
+					cwd: ctxPath,
 					repo: { owner, repo },
 				});
 				// No PR comments in branch mode
 				const payload = await buildAgentPayload({
 					prNumber: 0,
-					sha,
+					sha: effectiveSha,
 					failureSummary: summary,
 					comments: [],
 					debugPrompt: prompt,
@@ -241,16 +270,20 @@ export async function gather(opts: {
 				text = payload.text;
             const createdAt =
                 ci.runs[0]?.createdAt ||
-                (await gh.getCommitDate({ owner, repo }, sha)) ||
+                (await gh.getCommitDate({ owner, repo }, effectiveSha)) ||
                 new Date(0).toISOString();
             const age = formatAge(createdAt);
-            footerInfo = `Source: branch '${targetBranch}' (sha ${sha.slice(0, 7)}), run age: ${age}`;
+            footerInfo = `Source: branch '${targetBranch}' (sha ${effectiveSha.slice(0, 7)}), run age: ${age}`;
         } else {
-            text = `No failing runs found for branch '${targetBranch}' on ${sha.slice(0, 7)}. Latest CI: ${ci.conclusion || "unknown"}.`;
+            text = `No failing runs found for branch '${targetBranch}' on ${effectiveSha.slice(0, 7)}. Latest CI: ${ci.conclusion || "unknown"}.`;
             isError = true;
         }
 		} catch (_e) {
-			text = `Unable to gather CI context for branch '${targetBranch}' on ${sha.slice(0, 7)}.`;
+			text = `Unable to gather CI context for branch '${targetBranch}' on ${effectiveSha.slice(0, 7)}.`;
+			if (process.env.AWT_DEBUG) {
+				const msg = _e instanceof Error ? _e.stack || _e.message : String(_e);
+				process.stderr.write(`[awt-ci debug] ${msg}\n`);
+			}
 			isError = true;
 		}
 	}

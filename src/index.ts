@@ -78,7 +78,6 @@ yargs(hideBin(process.argv))
 			y
 				.option("wt", {
 					type: "string",
-					demandOption: true,
 					desc: "worktree name",
 				})
 				.option("engine", {
@@ -93,9 +92,15 @@ yargs(hideBin(process.argv))
 				.option("branch", {
 					type: "string",
 					desc: "remote branch name (gather latest failure for this branch, even without a PR)",
+				})
+				.check((argv) => {
+					if (!argv.wt && !argv.branch) {
+						throw new Error("Either --wt or --branch must be provided");
+					}
+					return true;
 				}),
 		async (argv) => {
-			const { wt, engine, copy, branch } = argv as any;
+			const { wt = "", engine, copy, branch } = argv as any;
 			const { gather } = await import("./gather.js");
 			await gather({ worktree: wt, engine, copy, branch });
 		},
