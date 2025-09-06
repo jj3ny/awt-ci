@@ -50,9 +50,15 @@ function buildClaudePrompt(bundle: FailureBundle, repo: RepoRef): string {
 	header.push(
 		`You are assisting as a senior engineer triaging CI failures for ${repo.owner}/${repo.repo}.`,
 	);
-	header.push(
-		`Produce a concise, actionable report for PR #${bundle.prNumber} (SHA ${bundle.sha.slice(0, 7)}).`,
-	);
+	if (bundle.prNumber && bundle.prNumber > 0) {
+		header.push(
+			`Produce a concise, actionable report for PR #${bundle.prNumber} (SHA ${bundle.sha.slice(0, 7)}).`,
+		);
+	} else {
+		header.push(
+			`Produce a concise, actionable report for branch SHA ${bundle.sha.slice(0, 7)}.`,
+		);
+	}
 	header.push(
 		`For each failed job: (1) name the failing tests/files with file::line if visible, (2) include key quoted log lines, (3) likely root cause, (4) minimal next actions, (5) exact gh commands to inspect details.`,
 	);
@@ -195,9 +201,15 @@ async function runClaudeQuery(
 
 function heuristicSummary(bundle: FailureBundle, repo: RepoRef): string {
 	const out: string[] = [];
-	out.push(
-		`Found CI failures for ${repo.owner}/${repo.repo} PR #${bundle.prNumber} on ${bundle.sha.slice(0, 7)}`,
-	);
+	if (bundle.prNumber && bundle.prNumber > 0) {
+		out.push(
+			`Found CI failures for ${repo.owner}/${repo.repo} PR #${bundle.prNumber} on ${bundle.sha.slice(0, 7)}`,
+		);
+	} else {
+		out.push(
+			`Found CI failures for ${repo.owner}/${repo.repo} branch SHA ${bundle.sha.slice(0, 7)}`,
+		);
+	}
 	if (bundle.runs?.length) {
 		out.push("Runs:");
 		out.push(...bundle.runs.map((r) => `- ${r.url} (${r.conclusion || "?"})`));
@@ -234,9 +246,18 @@ export async function buildAgentPayload(args: {
 	conflictFiles?: string[];
 	pushedAtIso?: string;
 }): Promise<{ sentinel: string; text: string }> {
-	const sentinel = `AWT-PR-${args.prNumber}-${args.sha.slice(0, 7)}`;
+	const sentinel =
+		args.prNumber && args.prNumber > 0
+			? `AWT-PR-${args.prNumber}-${args.sha.slice(0, 7)}`
+			: `AWT-BRANCH-${args.sha.slice(0, 7)}`;
 	const lines: string[] = [];
-	lines.push(`# CI failed for PR #${args.prNumber} on ${args.sha.slice(0, 7)}`);
+	if (args.prNumber && args.prNumber > 0) {
+		lines.push(
+			`# CI failed for PR #${args.prNumber} on ${args.sha.slice(0, 7)}`,
+		);
+	} else {
+		lines.push(`# CI failed for branch SHA ${args.sha.slice(0, 7)}`);
+	}
 	if (args.runs?.length)
 		lines.push(
 			`Runs: ${args.runs.map((r) => `${r.url} (${r.conclusion || "?"})`).join(", ")}`,
@@ -250,7 +271,7 @@ export async function buildAgentPayload(args: {
 	}
 	lines.push("\n## Summary of Failures");
 	lines.push(args.failureSummary);
-	if (args.comments?.length) {
+	if (args.prNumber && args.prNumber > 0 && args.comments?.length) {
 		lines.push(`\n## Comments since ${args.pushedAtIso || "last push"}`);
 		for (const c of args.comments)
 			lines.push(`- @${c.author} (${c.createdAt}): ${c.body} — ${c.url}`);

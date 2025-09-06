@@ -110,6 +110,72 @@ export class Gh {
 		return items.slice(0, cap);
 	}
 
+	async listCommentsRecent(
+		ref: RepoRef,
+		pr: number,
+		cap = 100,
+	): Promise<
+		{ author: string; createdAt: string; body: string; url: string }[]
+	> {
+		const items: {
+			author: string;
+			createdAt: string;
+			body: string;
+			url: string;
+		}[] = [];
+		// Issue comments (recent)
+		try {
+			const res = await this.octo.issues.listComments({
+				...ref,
+				issue_number: pr,
+				per_page: 100,
+			});
+			for (const c of res.data) {
+				items.push({
+					author: c.user?.login || "unknown",
+					createdAt: c.created_at || "",
+					body: c.body || "",
+					url: c.html_url || "",
+				});
+			}
+		} catch {}
+		// Review comments
+		try {
+			const rc = await this.octo.pulls.listReviewComments({
+				...ref,
+				pull_number: pr,
+				per_page: 100,
+			});
+			for (const c of rc.data) {
+				items.push({
+					author: c.user?.login || "unknown",
+					createdAt: c.created_at || "",
+					body: c.body || "",
+					url: c.html_url || "",
+				});
+			}
+		} catch {}
+		// Reviews (summaries)
+		try {
+			const rv = await this.octo.pulls.listReviews({
+				...ref,
+				pull_number: pr,
+				per_page: 100,
+			});
+			for (const r of rv.data) {
+				const submitted = r.submitted_at || "";
+				items.push({
+					author: r.user?.login || "unknown",
+					createdAt: submitted,
+					body: `[${r.state}]${r.body ? ` ${r.body}` : ""}`,
+					url: (r as any).html_url || (r._links as any)?.html?.href || "",
+				});
+			}
+		} catch {}
+		items.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+		return items.slice(-cap);
+	}
+
 	async latestCiForSha(
 		ref: RepoRef,
 		sha: string,
@@ -120,6 +186,7 @@ export class Gh {
 			url: string;
 			status: string;
 			conclusion: string | null;
+			createdAt: string | null;
 		}[];
 	}> {
 		const runsRes = await this.octo.actions.listWorkflowRunsForRepo({
@@ -132,6 +199,8 @@ export class Gh {
 			url: r.html_url || "",
 			status: r.status || "queued",
 			conclusion: r.conclusion,
+			createdAt:
+				(r as any).run_started_at || r.created_at || r.updated_at || null,
 		}));
 		const failureLike = new Set(["failure", "timed_out", "cancelled"]);
 		const allCompleted =

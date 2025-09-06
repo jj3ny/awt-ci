@@ -82,3 +82,15 @@ export async function gatherFailures(
 		logs: capped,
 	};
 }
+
+// Convenience: gather by SHA only (no PR). Returns bundle with prNumber=0 when failures exist.
+export async function gatherFailuresBySha(
+	ref: RepoRef,
+	sha: string,
+	gh: Gh,
+	perJobKB = 512,
+	totalMB = 5,
+): Promise<FailureBundle | null> {
+	const b = await gatherFailures(ref, 0, sha, gh, perJobKB, totalMB);
+	return b;
+}

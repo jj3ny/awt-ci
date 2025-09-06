@@ -18,6 +18,7 @@ export async function gather(opts: {
 	worktree: string;
 	engine: Engine;
 	copy: boolean;
+	branch?: string;
 }) {
 	const wt = opts.worktree;
 	const root = await repoRoot();
@@ -50,7 +51,7 @@ export async function gather(opts: {
 		currentBranch(root),
 	);
 	let prNumber: number | null = null;
-	if (branch && branch !== "detached") {
+	if (!opts.branch && branch && branch !== "detached") {
 		prNumber = await gh
 			.findOpenPrForBranch({ owner, repo }, owner, branch)
 			.catch(() => null);
@@ -58,16 +59,24 @@ export async function gather(opts: {
 
 	// Determine target SHA
 	let sha = state.last_push?.sha || null;
-	if (!sha && branch && branch !== "detached")
+	if (opts.branch) {
+		// Explicit remote branch mode: select latest remote HEAD for that branch
+		sha =
+			(await remoteHeadSha(wtPath, opts.branch).catch(async () =>
+				remoteHeadSha(root, opts.branch as string),
+			)) || sha;
+	} else if (!sha && branch && branch !== "detached") {
 		sha =
 			(await remoteHeadSha(wtPath, branch).catch(async () =>
 				remoteHeadSha(root, branch),
 			)) || null;
+	}
 	if (!sha) sha = await headSha(wtPath).catch(async () => headSha(root));
 	if (!sha) sha = ""; // best effort; CI may not be retrievable without SHA
 
 	let text = "";
 	let isError = false; // When true, prefer STDERR output
+	let footerInfo: string | null = null; // extra info for stdout (not copied)
 	if (prNumber && sha) {
 		const ci = await gh
 			.latestCiForSha({ owner, repo }, sha)
@@ -91,7 +100,7 @@ export async function gather(opts: {
 					sinceIso =
 						(await gh.getCommitDate({ owner, repo }, sha)) ||
 						new Date(0).toISOString();
-				let comments = await gh
+				const comments = await gh
 					.listCommentsSince(
 						{ owner, repo },
 						prNumber,
@@ -99,21 +108,20 @@ export async function gather(opts: {
 						cfg.maxRecentComments ?? 30,
 					)
 					.catch(() => []);
-				// If no comments found since the last push timestamp, widen the window
-				if (!comments || comments.length === 0) {
-					const lookbackDays = cfg.recentCommentsLookbackDays ?? 2;
-					const widenedSince = new Date(
-						Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
-					).toISOString();
-					comments = await gh
-						.listCommentsSince(
-							{ owner, repo },
-							prNumber,
-							widenedSince,
-							cfg.maxRecentComments ?? 30,
-						)
-						.catch(() => []);
-				}
+				// Compute prior comment stats without widening the window
+				const recentAll = await gh
+					.listCommentsRecent(
+						{ owner, repo },
+						prNumber,
+						cfg.maxRecentComments ?? 30,
+					)
+					.catch(() => []);
+				const prior = recentAll.filter(
+					(c) => (c.createdAt || "") < (sinceIso || ""),
+				);
+				const priorLatest = prior.length
+					? prior[prior.length - 1]?.createdAt || null
+					: null;
 				const payload = await buildAgentPayload({
 					prNumber,
 					sha,
@@ -127,6 +135,18 @@ export async function gather(opts: {
 					pushedAtIso: sinceIso,
 				});
 				text = payload.text;
+				// Footer info: PR and run age + comment counts
+				const createdAt = ci.runs[0]?.createdAt || sinceIso;
+				const age = formatAge(createdAt);
+				const sinceCount = comments?.length || 0;
+				const priorCount = prior.length;
+				const priorDelta = priorLatest
+					? `${formatDelta(
+							new Date(sinceIso || createdAt!).getTime() -
+								new Date(priorLatest).getTime(),
+						)} before last push`
+					: "no prior comments";
+				footerInfo = `Source: PR #${prNumber} (branch '${branch}'), run age: ${age}; comments since last push: ${sinceCount}, prior: ${priorCount} (${priorDelta})`;
 			} else {
 				text = `No failing runs found for PR #${prNumber} on ${sha.slice(0, 7)}. Latest CI: ${ci.conclusion || "unknown"}.`;
 				isError = true;
@@ -136,30 +156,101 @@ export async function gather(opts: {
 			text = `Unable to gather CI context for PR #${prNumber} on ${sha.slice(0, 7)}.`;
 			isError = true;
 		}
+	} else if (opts.branch && sha) {
+		// Branch-only mode: gather for latest CI failure on this branch
+		const ci = await gh
+			.latestCiForSha({ owner, repo }, sha)
+			.catch(() => ({ conclusion: null, runs: [] }));
+		try {
+			const bundle = await gatherFailures(
+				{ owner, repo },
+				0, // sentinel: no PR
+				sha,
+				gh,
+				summarizePerJobKB,
+				summarizeTotalMB,
+			);
+			if (bundle) {
+				const summary = await summarizeFailures(bundle, engine, {
+					cwd: wtPath,
+					repo: { owner, repo },
+				});
+				// No PR comments in branch mode
+				const payload = await buildAgentPayload({
+					prNumber: 0,
+					sha,
+					failureSummary: summary,
+					comments: [],
+					debugPrompt: prompt,
+					runs: ci.runs.map((r) => ({
+						url: r.url,
+						conclusion: r.conclusion || null,
+					})),
+				});
+				text = payload.text;
+				const createdAt =
+					ci.runs[0]?.createdAt ||
+					(await gh.getCommitDate({ owner, repo }, sha)) ||
+					new Date(0).toISOString();
+				const age = formatAge(createdAt);
+				footerInfo = `Source: branch '${opts.branch}' (sha ${sha.slice(0, 7)}), run age: ${age}`;
+			} else {
+				text = `No failing runs found for branch '${opts.branch}' on ${sha.slice(0, 7)}. Latest CI: ${ci.conclusion || "unknown"}.`;
+				isError = true;
+			}
+		} catch (_e) {
+			text = `Unable to gather CI context for branch '${opts.branch}' on ${sha.slice(0, 7)}.`;
+			isError = true;
+		}
 	} else {
-		text = `No open PR found for branch '${branch}'. Consider pushing and opening a PR first.`;
+		text = `No open PR found for branch '${branch}', and no --branch provided.`;
 		isError = true;
 	}
 
+	// Always print the payload to stdout/stderr
+	if (isError) process.stderr.write(`${text}\n`);
+	else process.stdout.write(`${text}\n`);
+	if (footerInfo) process.stdout.write(`\n${footerInfo}\n`);
+
+	// Also copy to clipboard unless disabled
 	if (opts.copy) {
 		const ok = await copyToClipboard(text);
-		if (!ok) {
-			if (isError) {
-				process.stderr.write(`${text}\n`);
-				process.stderr.write(
-					"(clipboard utility not found; printed to stderr)\n",
-				);
-			} else {
-				process.stdout.write(`${text}\n`);
-				process.stderr.write(
-					"(clipboard utility not found; printed to stdout)\n",
-				);
-			}
-		}
-	} else {
-		if (isError) process.stderr.write(`${text}\n`);
-		else process.stdout.write(`${text}\n`);
+		const msg = ok
+			? "(copied to clipboard)"
+			: isError
+				? "(clipboard utility not found; printed to stderr)"
+				: "(clipboard utility not found; printed to stdout)";
+		process.stderr.write(`${msg}\n`);
 	}
 }
 
 // safeRead moved to util.ts
+
+function formatAge(iso: string): string {
+	try {
+		const t = new Date(iso).getTime();
+		if (!Number.isFinite(t)) return "unknown";
+		let ms = Date.now() - t;
+		if (ms < 0) ms = 0;
+		const totalMin = Math.floor(ms / 60000);
+		const days = Math.floor(totalMin / (60 * 24));
+		const hours = Math.floor((totalMin % (60 * 24)) / 60);
+		const mins = totalMin % 60;
+		if (days > 0) return `${days}d${hours}h${mins}m`;
+		if (hours > 0) return `${hours}h${mins}m`;
+		return `${mins}m`;
+	} catch {
+		return "unknown";
+	}
+}
+
+function formatDelta(ms: number): string {
+	if (ms <= 0) return "0m";
+	const totalMin = Math.floor(ms / 60000);
+	const days = Math.floor(totalMin / (60 * 24));
+	const hours = Math.floor((totalMin % (60 * 24)) / 60);
+	const mins = totalMin % 60;
+	if (days > 0) return `${days}d${hours}h${mins}m`;
+	if (hours > 0) return `${hours}h${mins}m`;
+	return `${mins}m`;
+}

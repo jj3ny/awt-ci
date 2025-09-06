@@ -87,13 +87,17 @@ yargs(hideBin(process.argv))
 				})
 				.option("copy", {
 					type: "boolean",
-					default: false,
-					desc: "copy to clipboard if possible",
+					default: true,
+					desc: "copy to clipboard (also prints to stdout)",
+				})
+				.option("branch", {
+					type: "string",
+					desc: "remote branch name (gather latest failure for this branch, even without a PR)",
 				}),
 		async (argv) => {
-			const { wt, engine, copy } = argv as any;
+			const { wt, engine, copy, branch } = argv as any;
 			const { gather } = await import("./gather.js");
-			await gather({ worktree: wt, engine, copy });
+			await gather({ worktree: wt, engine, copy, branch });
 		},
 	)
 	.command(
