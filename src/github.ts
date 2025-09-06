@@ -201,6 +201,7 @@ export class Gh {
 			conclusion: r.conclusion,
 			createdAt:
 				(r as any).run_started_at || r.created_at || r.updated_at || null,
+			name: (r as any).name || null,
 		}));
 		const failureLike = new Set(["failure", "timed_out", "cancelled"]);
 		const allCompleted =
