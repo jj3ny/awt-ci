@@ -6,9 +6,11 @@ export interface RepoRef {
 }
 
 export interface AwtState {
-	last_push?: { sha: string; pushed_at: string };
-	last_ci_seen_for_sha?: string;
-	last_ci_conclusion?: string;
+    last_push?: { sha: string; pushed_at: string };
+    // Optional per-branch last push tracking
+    last_push_by_branch?: Record<string, { sha: string; pushed_at: string }>;
+    last_ci_seen_for_sha?: string;
+    last_ci_conclusion?: string;
 }
 
 export interface WatchConfig {
@@ -24,6 +26,7 @@ export interface WatchConfig {
 	eventMode?: boolean;
 	maxRecentComments?: number;
 	conflictHints?: "simple" | "simple+recent-base";
+	worktreeSetupCommands?: string[];
 }
 
 export interface FailureBundle {

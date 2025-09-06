@@ -12,15 +12,45 @@ export class Gh {
 		headOwner: string,
 		branch: string,
 	): Promise<number | null> {
-		const head = `${headOwner}:${branch}`;
+		try {
+			const head = `${headOwner}:${branch}`;
+			const res = await this.octo.pulls.list({
+				...ref,
+				head,
+				state: "open",
+				per_page: 10,
+			});
+			if (res.data.length) return res.data[0].number;
+		} catch {}
+		// Fallback: scan open PRs and match by head.ref
+		try {
+			const res2 = await this.octo.pulls.list({
+				...ref,
+				state: "open",
+				per_page: 100,
+				sort: "updated" as any,
+				direction: "desc" as any,
+			});
+			const pr = res2.data.find((p: any) => (p.head?.ref || "") === branch);
+			return pr ? pr.number : null;
+		} catch {
+			return null;
+		}
+	}
+
+	async latestOpenPr(
+		ref: RepoRef,
+	): Promise<{ number: number; headRefName: string } | null> {
 		const res = await this.octo.pulls.list({
 			...ref,
-			head,
 			state: "open",
-			per_page: 10,
+			per_page: 1,
+			sort: "updated" as any,
+			direction: "desc" as any,
 		});
 		const pr = res.data[0];
-		return pr ? pr.number : null;
+		if (!pr) return null;
+		return { number: pr.number, headRefName: (pr as any).head?.ref || "" };
 	}
 
 	async getPrLite(
@@ -223,6 +253,20 @@ export class Gh {
 		return { conclusion, runs };
 	}
 
+	async headShaForBranch(ref: RepoRef, branch: string): Promise<string | null> {
+		try {
+			const runsRes = await this.octo.actions.listWorkflowRunsForRepo({
+				...ref,
+				per_page: 1,
+				branch,
+			});
+			const run = runsRes.data.workflow_runs[0];
+			return (run as any)?.head_sha || null;
+		} catch {
+			return null;
+		}
+	}
+
 	async listJobsForRun(
 		ref: RepoRef,
 		runId: number,
@@ -240,6 +284,26 @@ export class Gh {
 			html_url: j.html_url || "",
 			conclusion: j.conclusion || null,
 		}));
+	}
+
+	async getBranchSha(ref: RepoRef, branch: string): Promise<string | null> {
+		try {
+			const { data } = await this.octo.repos.getBranch({
+				...ref,
+				branch,
+			});
+			return (data as any)?.commit?.sha || null;
+		} catch {
+			try {
+				const { data } = await this.octo.git.getRef({
+					...ref,
+					ref: `heads/${branch}`,
+				});
+				return (data as any)?.object?.sha || null;
+			} catch {
+				return null;
+			}
+		}
 	}
 
 	async fetchJobLog(ref: RepoRef, jobId: number): Promise<string> {

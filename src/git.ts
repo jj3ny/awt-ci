@@ -13,15 +13,19 @@ export function repoRootForWorktree(repoBase: string, wtName: string): string {
 }
 
 export async function currentBranch(wtPath: string): Promise<string> {
-	const r1 = await exec("git", [
-		"-C",
-		wtPath,
-		"symbolic-ref",
-		"--short",
-		"HEAD",
-	]);
-	if (r1.code === 0) return r1.stdout.trim();
-	return "detached";
+    // Try robust detection first
+    const r0 = await exec("git", ["-C", wtPath, "branch", "--show-current"]);
+    const b0 = r0.stdout.trim();
+    if (r0.code === 0 && b0) return b0;
+    const r1 = await exec("git", [
+        "-C",
+        wtPath,
+        "symbolic-ref",
+        "--short",
+        "HEAD",
+    ]);
+    if (r1.code === 0 && r1.stdout.trim()) return r1.stdout.trim();
+    return "detached";
 }
 
 export async function headSha(wtPath: string): Promise<string> {
