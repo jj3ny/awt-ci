@@ -143,6 +143,8 @@ export async function watch(opts: {
 						url: r.url,
 						conclusion: r.conclusion || null,
 					})),
+					summaryEngine: engine,
+					logs: bundle.logs,
 					pushedAtIso: sinceIso,
 				});
 				await pasteAndEnter(pane, payload.text, payload.sentinel);

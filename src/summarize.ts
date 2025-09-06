@@ -243,6 +243,8 @@ export async function buildAgentPayload(args: {
 	comments: { author: string; createdAt: string; body: string; url: string }[];
 	debugPrompt: string;
 	runs: { url: string; conclusion: string | null }[];
+		summaryEngine?: string;
+		logs?: { jobId: number; runId: number; jobName: string; text: string }[];
 	conflictFiles?: string[];
 	pushedAtIso?: string;
 }): Promise<{ sentinel: string; text: string }> {
@@ -271,12 +273,24 @@ export async function buildAgentPayload(args: {
 	}
 	lines.push("\n## Summary of Failures");
 	lines.push(args.failureSummary);
+		lines.push("</ci-context>");
 	if (args.prNumber && args.prNumber > 0 && args.comments?.length) {
 		lines.push(`\n## Comments since ${args.pushedAtIso || "last push"}`);
 		for (const c of args.comments)
 			lines.push(`- @${c.author} (${c.createdAt}): ${c.body} — ${c.url}`);
 	}
-	lines.push(`\n## Next actions\n${args.debugPrompt}`);
+	if (args.logs && args.logs.length) {
+			lines.push("\n## Raw Logs (truncated)");
+			lines.push("<ci-logs>");
+			for (const l of args.logs) {
+				lines.push(`\n--- Job ${l.jobName} (run ${l.runId}, job ${l.jobId}) ---`);
+				lines.push("<pre>");
+				lines.push(l.text);
+				lines.push("</pre>");
+			}
+			lines.push("</ci-logs>");
+		}
+		lines.push(`\n## Next actions\n${args.debugPrompt}`);
 	lines.push(`\n<sentinel:${sentinel}>`);
 	return { sentinel, text: lines.join("\n") };
 }
