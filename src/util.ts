@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 import { parse } from "jsonc-parser";
 
 export async function exec(
@@ -122,10 +122,13 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 	return false;
 }
 
-export async function safeRead(filePath: string, fallback = "Please analyze the failures above and continue working to resolve them."): Promise<string> {
-  try {
-    return await (await fs.readFile(filePath, "utf8")).toString();
-  } catch {
-    return fallback;
-  }
+export async function safeRead(
+	filePath: string,
+	fallback = "Please analyze the failures above and continue working to resolve them.",
+): Promise<string> {
+	try {
+		return await (await fs.readFile(filePath, "utf8")).toString();
+	} catch {
+		return fallback;
+	}
 }

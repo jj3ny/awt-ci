@@ -1,6 +1,6 @@
-import { exec, hashString, sanitizeName, writeTempFile } from "./util.js";
-import * as path from "node:path";
 import { createHash } from "node:crypto";
+import * as path from "node:path";
+import { exec, hashString, sanitizeName, writeTempFile } from "./util.js";
 
 function md5Hex(s: string): string {
 	return createHash("md5").update(s).digest("hex");
@@ -55,11 +55,15 @@ export async function resolvePrimaryPane(
 		.split("\n")
 		.map((l) => {
 			const [active, id, last] = l.trim().split(" ");
-			return { active: active === "1", id: id ?? "", last: Number(last || "0") };
+			return {
+				active: active === "1",
+				id: id ?? "",
+				last: Number(last || "0"),
+			};
 		})
 		.filter((r) => r.id.length > 0);
 	const act = rows.find((r) => r.active);
-	if (act && act.id) return act.id;
+	if (act?.id) return act.id;
 	rows.sort((a, b) => a.last - b.last);
 	if (rows.length === 0) throw new Error(`No panes in ${sess}:${win}`);
 	const first = rows[0];
@@ -84,23 +88,23 @@ export async function paneHistorySig(
 }
 
 export async function pasteAndEnter(
-    paneId: string,
-    payload: string,
-    sentinel: string,
+	paneId: string,
+	payload: string,
+	sentinel: string,
 ): Promise<"ok" | "retry"> {
 	const tmp = await writeTempFile(payload);
 	const buf = `awtci:${Date.now()}`;
 	await exec("tmux", ["load-buffer", "-b", buf, tmp]);
 	await exec("tmux", ["paste-buffer", "-b", buf, "-t", paneId]);
 	await exec("tmux", ["send-keys", "-t", paneId, "Enter"]);
-  for (let i = 0; i < 8; i++) {
-      const tail = (
-          await exec("tmux", ["capture-pane", "-p", "-S", "-120", "-t", paneId])
-      ).stdout;
-      if (tail.includes(sentinel)) return "ok";
-      await new Promise((r) => setTimeout(r, 500));
-  }
-  return "retry";
+	for (let i = 0; i < 8; i++) {
+		const tail = (
+			await exec("tmux", ["capture-pane", "-p", "-S", "-120", "-t", paneId])
+		).stdout;
+		if (tail.includes(sentinel)) return "ok";
+		await new Promise((r) => setTimeout(r, 500));
+	}
+	return "retry";
 }
 
 export async function notifyAll(

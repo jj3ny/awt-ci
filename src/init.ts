@@ -1,7 +1,7 @@
-import * as path from "node:path";
 import { promises as fs } from "node:fs";
-import { exec } from "./util.js";
+import * as path from "node:path";
 import { repoRoot } from "./git.js";
+import { exec } from "./util.js";
 
 const DEFAULT_CONFIG = `{
   // Optional owner/repo override; usually auto-detected from origin remote
@@ -95,7 +95,6 @@ exit 0
 `;
 
 // removed old EVENT_WORKFLOW_TEMPLATE
-
 
 export async function initRepo(opts: {
 	withHook: boolean;

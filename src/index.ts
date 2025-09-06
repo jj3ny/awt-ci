@@ -1,6 +1,6 @@
+import { spawn } from "node:child_process";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
-import { spawn } from "node:child_process";
 
 yargs(hideBin(process.argv))
 	.scriptName("awt-ci")

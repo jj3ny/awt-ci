@@ -42,7 +42,8 @@ export async function originOwnerRepo(
 	const url = stdout.trim();
 	// SSH: git@github.com:owner/repo.git
 	const m = url.match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/);
-	if (!m || !m[1] || !m[2]) throw new Error("Could not parse origin URL: " + url);
+	if (!m || !m[1] || !m[2])
+		throw new Error(`Could not parse origin URL: ${url}`);
 	return { owner: m[1], repo: m[2] };
 }
 

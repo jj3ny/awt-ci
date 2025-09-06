@@ -1,27 +1,25 @@
 import * as path from "node:path";
-import { exec, readJsonc, sleep, getGhToken, safeRead } from "./util.js";
+import { gatherFailures } from "./ci.js";
 import {
-	repoRoot,
-	repoRootForWorktree,
 	currentBranch,
-	headSha,
 	originOwnerRepo,
 	remoteHeadSha,
+	repoRoot,
+	repoRootForWorktree,
 } from "./git.js";
+import { Gh } from "./github.js";
+import { readState, writeState } from "./state.js";
+import { buildAgentPayload, summarizeFailures } from "./summarize.js";
 import {
-	resolveRepoSessionNameOrScan,
-	windowNameForWt,
-	resolvePrimaryPane,
+	notifyAll,
 	paneHistorySig,
 	pasteAndEnter,
-	notifyAll,
+	resolvePrimaryPane,
+	resolveRepoSessionNameOrScan,
+	windowNameForWt,
 } from "./tmux.js";
-import { readState, writeState } from "./state.js";
-import { Gh } from "./github.js";
-import { gatherFailures } from "./ci.js";
-import { summarizeFailures, buildAgentPayload } from "./summarize.js";
 import type { Engine, WatchConfig } from "./types.js";
-import { promises as fs } from "node:fs";
+import { getGhToken, readJsonc, safeRead, sleep } from "./util.js";
 
 export async function watch(opts: {
 	worktree: string;
@@ -42,21 +40,21 @@ export async function watch(opts: {
 	const engine = cfg.engine || opts.engine;
 	const summarizePerJobKB = cfg.summarizePerJobKB ?? 512;
 	const summarizeTotalMB = cfg.summarizeTotalMB ?? 5;
-  const pollIdle = cfg.pollSecIdle ?? opts.pollSecIdle;
-  const pollFast = cfg.pollSecPostPush ?? opts.pollSecPostPush;
-  const idleSec = cfg.idleSec ?? opts.idleSec;
-  const conflictHints = cfg.conflictHints ?? "simple";
+	const pollIdle = cfg.pollSecIdle ?? opts.pollSecIdle;
+	const pollFast = cfg.pollSecPostPush ?? opts.pollSecPostPush;
+	const idleSec = cfg.idleSec ?? opts.idleSec;
+	const conflictHints = cfg.conflictHints ?? "simple";
 	const promptPath = cfg.promptPath
 		? path.join(root, cfg.promptPath)
 		: path.join(root, ".awt", "prompts", "debug.md");
-  const prompt = await safeRead(promptPath);
+	const prompt = await safeRead(promptPath);
 
 	const win = windowNameForWt(wt);
 	const sess = await resolveRepoSessionNameOrScan(root, win);
 	let pane: string;
 	try {
 		pane = await resolvePrimaryPane(sess, win);
-	} catch (e) {
+	} catch (_e) {
 		throw new Error(
 			`tmux target not found for ${sess}:${win}. Ensure the worktree window exists.`,
 		);
@@ -194,18 +192,18 @@ export async function watch(opts: {
 				notifiedNoPrForSha = null;
 			}
 
-      // Resolve PR: prefer by SHA, then by branch
-      let prNumber: number | null = null;
-      if (state.last_push?.sha) {
-        prNumber = await gh
-          .findPrBySha({ owner, repo }, state.last_push.sha)
-          .catch(() => null);
-      }
-      if (!prNumber && branch && branch !== "detached") {
-        prNumber = await gh
-          .findOpenPrForBranch({ owner, repo }, owner, branch)
-          .catch(() => null);
-      }
+			// Resolve PR: prefer by SHA, then by branch
+			let prNumber: number | null = null;
+			if (state.last_push?.sha) {
+				prNumber = await gh
+					.findPrBySha({ owner, repo }, state.last_push.sha)
+					.catch(() => null);
+			}
+			if (!prNumber && branch && branch !== "detached") {
+				prNumber = await gh
+					.findOpenPrForBranch({ owner, repo }, owner, branch)
+					.catch(() => null);
+			}
 			if (
 				postPush &&
 				!prNumber &&
@@ -234,20 +232,20 @@ export async function watch(opts: {
 							.filter((f) => f.status === "modified" && f.changes > 100)
 							.map((f) => f.filename)
 							.slice(0, 10);
-            const rebaseSummary =
-              conflictHints === "simple+recent-base"
-                ? "Rebase needed (merge conflicts or behind main). Please rebase on main and resolve.\n\nAlso inspect recent base changes to these files and nearby code:\n  git fetch origin\n  git log --name-only --since='7 days' origin/main | sed -n '1,200p'\n  git log --merges --since='14 days' origin/main | sed -n '1,200p'\n"
-                : "Rebase needed (merge conflicts or behind main). Please rebase on main and resolve.";
-            const payload = await buildAgentPayload({
-              prNumber,
-              sha: state.last_push.sha,
-              failureSummary: rebaseSummary,
-              comments: [],
-              debugPrompt: prompt,
-              runs: [],
-              conflictFiles: likely,
-              pushedAtIso: state.last_push.pushed_at,
-            });
+						const rebaseSummary =
+							conflictHints === "simple+recent-base"
+								? "Rebase needed (merge conflicts or behind main). Please rebase on main and resolve.\n\nAlso inspect recent base changes to these files and nearby code:\n  git fetch origin\n  git log --name-only --since='7 days' origin/main | sed -n '1,200p'\n  git log --merges --since='14 days' origin/main | sed -n '1,200p'\n"
+								: "Rebase needed (merge conflicts or behind main). Please rebase on main and resolve.";
+						const payload = await buildAgentPayload({
+							prNumber,
+							sha: state.last_push.sha,
+							failureSummary: rebaseSummary,
+							comments: [],
+							debugPrompt: prompt,
+							runs: [],
+							conflictFiles: likely,
+							pushedAtIso: state.last_push.pushed_at,
+						});
 						const res = await pasteAndEnter(
 							pane,
 							payload.text,
@@ -340,7 +338,7 @@ export async function watch(opts: {
 			await sleep(jitterSec * 1000);
 			// After CI seen for this sha, revert to idle cadence
 			if (state.last_ci_seen_for_sha === state.last_push?.sha) postPush = false;
-		} catch (err) {
+		} catch (_err) {
 			// keep the watcher alive
 			await sleep(2000);
 		}

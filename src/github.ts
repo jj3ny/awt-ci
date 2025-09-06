@@ -39,7 +39,7 @@ export class Gh {
 		};
 	}
 
-  async listCommentsSince(
+	async listCommentsSince(
 		ref: RepoRef,
 		pr: number,
 		sinceIso: string,
@@ -70,7 +70,7 @@ export class Gh {
 				});
 			}
 		} catch {}
-    // Review comments (code review line comments)
+		// Review comments (code review line comments)
 		try {
 			const rc = await this.octo.pulls.listReviewComments({
 				...ref,
@@ -87,24 +87,28 @@ export class Gh {
 				});
 			}
 		} catch {}
-    // Review summaries
-    try {
-      const rv = await this.octo.pulls.listReviews({ ...ref, pull_number: pr, per_page: 100 });
-      for (const r of rv.data) {
-        const submitted = r.submitted_at || "";
-        if (submitted && submitted > sinceIso) {
-          items.push({
-            author: r.user?.login || "unknown",
-            createdAt: submitted,
-            body: `[${r.state}]` + (r.body ? ` ${r.body}` : ""),
-            url: (r as any).html_url || (r._links as any)?.html?.href || "",
-          });
-        }
-      }
-    } catch {}
-    items.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-    return items.slice(0, cap);
-  }
+		// Review summaries
+		try {
+			const rv = await this.octo.pulls.listReviews({
+				...ref,
+				pull_number: pr,
+				per_page: 100,
+			});
+			for (const r of rv.data) {
+				const submitted = r.submitted_at || "";
+				if (submitted && submitted > sinceIso) {
+					items.push({
+						author: r.user?.login || "unknown",
+						createdAt: submitted,
+						body: `[${r.state}]${r.body ? ` ${r.body}` : ""}`,
+						url: (r as any).html_url || (r._links as any)?.html?.href || "",
+					});
+				}
+			}
+		} catch {}
+		items.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+		return items.slice(0, cap);
+	}
 
 	async latestCiForSha(
 		ref: RepoRef,
@@ -123,17 +127,21 @@ export class Gh {
 			per_page: 20,
 			head_sha: sha,
 		});
-    const runs = runsRes.data.workflow_runs.map((r) => ({
-      id: r.id,
-      url: r.html_url || "",
-      status: r.status || "queued",
-      conclusion: r.conclusion,
-    }));
-    const failureLike = new Set(["failure", "timed_out", "cancelled"]);
-    const allCompleted = runs.length > 0 && runs.every((r) => r.status === "completed");
-    const anyFailed = runs.some(
-      (r) => r.status === "completed" && r.conclusion && failureLike.has(r.conclusion),
-    );
+		const runs = runsRes.data.workflow_runs.map((r) => ({
+			id: r.id,
+			url: r.html_url || "",
+			status: r.status || "queued",
+			conclusion: r.conclusion,
+		}));
+		const failureLike = new Set(["failure", "timed_out", "cancelled"]);
+		const allCompleted =
+			runs.length > 0 && runs.every((r) => r.status === "completed");
+		const anyFailed = runs.some(
+			(r) =>
+				r.status === "completed" &&
+				r.conclusion &&
+				failureLike.has(r.conclusion),
+		);
 		let conclusion: string | null = null;
 		if (allCompleted) {
 			conclusion = anyFailed

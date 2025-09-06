@@ -1,5 +1,5 @@
-import type { RepoRef, FailureBundle } from "./types.js";
-import { Gh } from "./github.js";
+import type { Gh } from "./github.js";
+import type { FailureBundle, RepoRef } from "./types.js";
 import { truncateByKB } from "./util.js";
 
 export async function gatherFailures(
@@ -12,8 +12,10 @@ export async function gatherFailures(
 ): Promise<FailureBundle | null> {
 	const ci = await gh.latestCiForSha(ref, sha);
 	if (!ci.runs.length) return null;
-  const failureLike = new Set(["failure", "timed_out", "cancelled"]);
-  const anyFailed = ci.runs.some((r) => r.conclusion && failureLike.has(r.conclusion));
+	const failureLike = new Set(["failure", "timed_out", "cancelled"]);
+	const anyFailed = ci.runs.some(
+		(r) => r.conclusion && failureLike.has(r.conclusion),
+	);
 	if (!anyFailed) return null;
 
 	const jobsAll: {
@@ -29,9 +31,13 @@ export async function gatherFailures(
 		text: string;
 	}[] = [];
 
-  for (const r of ci.runs.filter((r) => r.conclusion && failureLike.has(r.conclusion))) {
-    const jobs = await gh.listJobsForRun(ref, r.id);
-    for (const j of jobs.filter((j) => j.conclusion && failureLike.has(j.conclusion))) {
+	for (const r of ci.runs.filter(
+		(r) => r.conclusion && failureLike.has(r.conclusion),
+	)) {
+		const jobs = await gh.listJobsForRun(ref, r.id);
+		for (const j of jobs.filter(
+			(j) => j.conclusion && failureLike.has(j.conclusion),
+		)) {
 			jobsAll.push({
 				id: j.id,
 				runId: r.id,
@@ -42,7 +48,7 @@ export async function gatherFailures(
 				const raw = await gh.fetchJobLog(ref, j.id);
 				const text = truncateByKB(raw, perJobKB);
 				logEntries.push({ jobId: j.id, runId: r.id, jobName: j.name, text });
-			} catch (e) {
+			} catch (_e) {
 				logEntries.push({
 					jobId: j.id,
 					runId: r.id,

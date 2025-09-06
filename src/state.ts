@@ -1,5 +1,5 @@
-import * as path from "node:path";
 import { promises as fs } from "node:fs";
+import * as path from "node:path";
 import type { AwtState } from "./types.js";
 
 export async function readState(repoRoot: string): Promise<AwtState> {
@@ -19,7 +19,7 @@ export async function writeState(
 	const dir = path.join(repoRoot, ".awt");
 	await fs.mkdir(dir, { recursive: true });
 	const p = path.join(dir, "state.json");
-	const tmp = p + ".tmp";
+	const tmp = `${p}.tmp`;
 	await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
 	await fs.rename(tmp, p);
 }

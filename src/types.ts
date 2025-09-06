@@ -12,18 +12,18 @@ export interface AwtState {
 }
 
 export interface WatchConfig {
-  owner?: string;
-  repo?: string;
-  promptPath?: string;
-  engine?: Engine;
-  summarizePerJobKB?: number;
-  summarizeTotalMB?: number;
-  pollSecIdle?: number;
-  pollSecPostPush?: number;
-  idleSec?: number;
-  eventMode?: boolean;
-  maxRecentComments?: number;
-  conflictHints?: "simple" | "simple+recent-base";
+	owner?: string;
+	repo?: string;
+	promptPath?: string;
+	engine?: Engine;
+	summarizePerJobKB?: number;
+	summarizeTotalMB?: number;
+	pollSecIdle?: number;
+	pollSecPostPush?: number;
+	idleSec?: number;
+	eventMode?: boolean;
+	maxRecentComments?: number;
+	conflictHints?: "simple" | "simple+recent-base";
 }
 
 export interface FailureBundle {

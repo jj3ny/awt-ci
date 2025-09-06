@@ -1,19 +1,18 @@
 import * as path from "node:path";
-import { promises as fs } from "node:fs";
+import { gatherFailures } from "./ci.js";
 import {
-	repoRoot,
-	repoRootForWorktree,
 	currentBranch,
 	headSha,
 	originOwnerRepo,
 	remoteHeadSha,
+	repoRoot,
+	repoRootForWorktree,
 } from "./git.js";
-import { readJsonc, copyToClipboard, getGhToken, safeRead } from "./util.js";
-import { readState } from "./state.js";
 import { Gh } from "./github.js";
-import { gatherFailures } from "./ci.js";
-import { summarizeFailures, buildAgentPayload } from "./summarize.js";
+import { readState } from "./state.js";
+import { buildAgentPayload, summarizeFailures } from "./summarize.js";
 import type { Engine, WatchConfig } from "./types.js";
+import { copyToClipboard, getGhToken, readJsonc, safeRead } from "./util.js";
 
 export async function gather(opts: {
 	worktree: string;
@@ -33,7 +32,10 @@ export async function gather(opts: {
 	const promptPath = cfg.promptPath
 		? path.join(root, cfg.promptPath)
 		: path.join(root, ".awt", "prompts", "debug.md");
-  const prompt = await safeRead(promptPath, "Please analyze the failures above and continue working to resolve them.");
+	const prompt = await safeRead(
+		promptPath,
+		"Please analyze the failures above and continue working to resolve them.",
+	);
 
 	const ghToken = await getGhToken();
 	const gh = new Gh(ghToken || undefined);
@@ -65,66 +67,83 @@ export async function gather(opts: {
 	if (!sha) sha = ""; // best effort; CI may not be retrievable without SHA
 
 	let text = "";
+	let isError = false; // When true, prefer STDERR output
 	if (prNumber && sha) {
 		const ci = await gh
 			.latestCiForSha({ owner, repo }, sha)
 			.catch(() => ({ conclusion: null, runs: [] }));
-		const bundle = await gatherFailures(
-			{ owner, repo },
-			prNumber,
-			sha,
-			gh,
-			summarizePerJobKB,
-			summarizeTotalMB,
-		);
-		if (bundle) {
-			const summary = await summarizeFailures(bundle, engine, {
-				cwd: wtPath,
-				repo: { owner, repo },
-			});
-			let sinceIso = state.last_push?.pushed_at;
-			if (!sinceIso)
-				sinceIso =
-					(await gh.getCommitDate({ owner, repo }, sha)) ||
-					new Date(0).toISOString();
-			const comments = await gh
-				.listCommentsSince(
-					{ owner, repo },
-					prNumber,
-					sinceIso,
-					cfg.maxRecentComments ?? 30,
-				)
-				.catch(() => []);
-			const payload = await buildAgentPayload({
+		try {
+			const bundle = await gatherFailures(
+				{ owner, repo },
 				prNumber,
 				sha,
-				failureSummary: summary,
-				comments,
-				debugPrompt: prompt,
-				runs: ci.runs.map((r) => ({
-					url: r.url,
-					conclusion: r.conclusion || null,
-				})),
-				pushedAtIso: sinceIso,
-			});
-			text = payload.text;
-		} else {
-			text = `No failing runs found for PR #${prNumber} on ${sha.slice(0, 7)}. Latest CI: ${ci.conclusion || "unknown"}.`;
+				gh,
+				summarizePerJobKB,
+				summarizeTotalMB,
+			);
+			if (bundle) {
+				const summary = await summarizeFailures(bundle, engine, {
+					cwd: wtPath,
+					repo: { owner, repo },
+				});
+				let sinceIso = state.last_push?.pushed_at;
+				if (!sinceIso)
+					sinceIso =
+						(await gh.getCommitDate({ owner, repo }, sha)) ||
+						new Date(0).toISOString();
+				const comments = await gh
+					.listCommentsSince(
+						{ owner, repo },
+						prNumber,
+						sinceIso,
+						cfg.maxRecentComments ?? 30,
+					)
+					.catch(() => []);
+				const payload = await buildAgentPayload({
+					prNumber,
+					sha,
+					failureSummary: summary,
+					comments,
+					debugPrompt: prompt,
+					runs: ci.runs.map((r) => ({
+						url: r.url,
+						conclusion: r.conclusion || null,
+					})),
+					pushedAtIso: sinceIso,
+				});
+				text = payload.text;
+			} else {
+				text = `No failing runs found for PR #${prNumber} on ${sha.slice(0, 7)}. Latest CI: ${ci.conclusion || "unknown"}.`;
+				isError = true;
+			}
+		} catch (_e) {
+			// Could not gather context (API or other failure)
+			text = `Unable to gather CI context for PR #${prNumber} on ${sha.slice(0, 7)}.`;
+			isError = true;
 		}
 	} else {
 		text = `No open PR found for branch '${branch}'. Consider pushing and opening a PR first.`;
+		isError = true;
 	}
 
 	if (opts.copy) {
 		const ok = await copyToClipboard(text);
 		if (!ok) {
-			process.stdout.write(text + "\n");
-			process.stderr.write(
-				"(clipboard utility not found; printed to stdout)\n",
-			);
+			if (isError) {
+				process.stderr.write(`${text}\n`);
+				process.stderr.write(
+					"(clipboard utility not found; printed to stderr)\n",
+				);
+			} else {
+				process.stdout.write(`${text}\n`);
+				process.stderr.write(
+					"(clipboard utility not found; printed to stdout)\n",
+				);
+			}
 		}
 	} else {
-		process.stdout.write(text + "\n");
+		if (isError) process.stderr.write(`${text}\n`);
+		else process.stdout.write(`${text}\n`);
 	}
 }
 

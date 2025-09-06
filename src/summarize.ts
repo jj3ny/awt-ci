@@ -1,4 +1,5 @@
 import type { Engine, FailureBundle, RepoRef } from "./types.js";
+
 // Optional Gemini fallback
 let GoogleGenerativeAI: any = null;
 try {
@@ -32,7 +33,7 @@ export async function summarizeFailures(
 			fallbackModel,
 		);
 		if (summary2) return summary2;
-	} catch (e) {
+	} catch (_e) {
 		// fall through to heuristic
 	}
 	// Try Gemini if preferred or available
@@ -83,7 +84,7 @@ function buildClaudePrompt(bundle: FailureBundle, repo: RepoRef): string {
 		header.join("\n"),
 		"\nCI runs:",
 		runs,
-		"\nIf needed, retrieve full logs locally with:\n" + ghHints,
+		`\nIf needed, retrieve full logs locally with:\n${ghHints}`,
 		"\nLogs (tail, truncated):",
 		logs.join("\n"),
 	].join("\n");
@@ -254,7 +255,7 @@ export async function buildAgentPayload(args: {
 		for (const c of args.comments)
 			lines.push(`- @${c.author} (${c.createdAt}): ${c.body} — ${c.url}`);
 	}
-	lines.push("\n## Next actions\n" + args.debugPrompt);
+	lines.push(`\n## Next actions\n${args.debugPrompt}`);
 	lines.push(`\n<sentinel:${sentinel}>`);
 	return { sentinel, text: lines.join("\n") };
 }
