@@ -1,5 +1,6 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
+import { spawn } from "node:child_process";
 
 yargs(hideBin(process.argv))
 	.scriptName("awt-ci")
@@ -20,10 +21,45 @@ yargs(hideBin(process.argv))
 				.option("idle-sec", { type: "number", default: 300 })
 				.option("poll-sec-idle", { type: "number", default: 60 })
 				.option("poll-sec-post-push", { type: "number", default: 20 })
-				.option("event-mode", { type: "boolean", default: false }),
+				.option("event-mode", { type: "boolean", default: false })
+				.option("foreground", {
+					type: "boolean",
+					default: false,
+					desc: "run in foreground (no detach)",
+				}),
 		async (argv) => {
-			const { wt, engine, idleSec, pollSecIdle, pollSecPostPush, eventMode } =
-				argv as any;
+			const {
+				wt,
+				engine,
+				idleSec,
+				pollSecIdle,
+				pollSecPostPush,
+				eventMode,
+				foreground,
+			} = argv as any;
+
+			// Detach by default unless explicitly in event mode or foreground
+			if (!eventMode && !foreground) {
+				const node = process.execPath;
+				const script = process.argv[1] || new URL(import.meta.url).pathname;
+				const args: readonly string[] = [
+					script,
+					...process.argv.slice(2),
+					"--foreground",
+				];
+				const child = spawn(node, args as string[], {
+					detached: true,
+					stdio: "ignore",
+					cwd: process.cwd(),
+					env: process.env,
+				});
+				(child as unknown as { unref: () => void }).unref();
+				console.log(
+					"awt-ci watch started in background. Use --foreground to run interactively.",
+				);
+				return;
+			}
+
 			const { watch } = await import("./watch.js");
 			await watch({
 				worktree: wt,
