@@ -267,6 +267,35 @@ export class Gh {
 		}
 	}
 
+	/**
+	 * Return the head_sha for the most recent failing run on a branch.
+	 * Considers conclusions that indicate failure-like outcomes.
+	 */
+	async latestFailingShaForBranch(
+		ref: RepoRef,
+		branch: string,
+		perPage = 50,
+	): Promise<string | null> {
+		try {
+			const runsRes = await this.octo.actions.listWorkflowRunsForRepo({
+				...ref,
+				branch,
+				per_page: Math.min(Math.max(perPage, 1), 100),
+			});
+			const failureLike = new Set(["failure", "timed_out", "cancelled"]);
+			for (const r of runsRes.data.workflow_runs) {
+				const status = (r.status || "").toString();
+				const concl = (r.conclusion || "").toString();
+				if (status === "completed" && failureLike.has(concl)) {
+					return (r as any)?.head_sha || null;
+				}
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	}
+
 	async listJobsForRun(
 		ref: RepoRef,
 		runId: number,

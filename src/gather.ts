@@ -242,7 +242,7 @@ export async function gather(opts: {
 			} catch {}
 		}
 		try {
-			const bundle = await gatherFailures(
+			let bundle = await gatherFailures(
 				{ owner, repo },
 				0, // sentinel: no PR
 				effectiveSha,
@@ -250,6 +250,30 @@ export async function gather(opts: {
 				summarizePerJobKB,
 				summarizeTotalMB,
 			);
+
+			// If there are runs but none failing for this SHA, try the most recent failing run on this branch
+			if (!bundle && opts.branch) {
+				try {
+					const failingSha = await gh.latestFailingShaForBranch(
+						{ owner, repo },
+						targetBranch,
+					);
+					if (failingSha && failingSha !== effectiveSha) {
+						effectiveSha = failingSha;
+						ci = await gh
+							.latestCiForSha({ owner, repo }, effectiveSha)
+							.catch(() => ({ conclusion: null, runs: [] }));
+						bundle = await gatherFailures(
+							{ owner, repo },
+							0,
+							effectiveSha,
+							gh,
+							summarizePerJobKB,
+							summarizeTotalMB,
+						);
+					}
+				} catch {}
+			}
 			if (bundle) {
 				const summary = await summarizeFailures(bundle, engine, {
 					cwd: ctxPath,
