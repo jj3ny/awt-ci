@@ -1,0 +1,33 @@
+{
+	"name": "awt-ci",
+	"version": "0.1.0",
+	"type": "module",
+	"private": true,
+	"bin": {
+		"awt-ci": "dist/index.js"
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"build": "tsup",
+		"prepare": "tsup",
+		"dev": "tsx src/index.ts",
+		"start": "node dist/index.js",
+		"link": "npm run build && npm i -g ."
+	},
+	"dependencies": {
+		"@octokit/rest": "^20.1.1",
+		"@anthropic-ai/claude-code": "^0.2.0",
+		"@google/generative-ai": "^0.11.0",
+		"jsonc-parser": "^3.2.1",
+		"yargs": "^17.7.2"
+	},
+	"devDependencies": {
+		"@types/node": "^20.14.10",
+		"@types/yargs": "^17.0.32",
+		"tsup": "^8.1.0",
+		"tsx": "^4.15.7",
+		"typescript": "^5.5.4"
+	}
+}

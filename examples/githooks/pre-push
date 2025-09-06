@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Example pre-push hook for awt-ci
+# Writes the latest pushed SHA and timestamp to .awt/state.json so
+# awt-ci can fetch PR comments "since last push" accurately.
+
+root="$(git rev-parse --show-toplevel)"
+sha="$(git rev-parse HEAD)"
+now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+mkdir -p "$root/.awt"
+state="$root/.awt/state.json"
+tmp="$state.tmp.$$"
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 - "$state" "$tmp" "$sha" "$now" <<'PY'
+import json, sys, os
+src, dst, sha, now = sys.argv[1:]
+data = {}
+if os.path.exists(src):
+    try:
+        with open(src) as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+data["last_push"] = {"sha": sha, "pushed_at": now}
+with open(dst, "w") as f:
+    json.dump(data, f)
+PY
+  mv "$tmp" "$state"
+else
+  printf '{"last_push":{"sha":"%s","pushed_at":"%s"}}' "$sha" "$now" > "$state"
+fi
+
+exit 0
+

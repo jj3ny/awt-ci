@@ -1,0 +1,24 @@
+{
+	// Optional owner/repo override; usually auto-detected from origin remote
+	// "owner": "your-org",
+	// "repo": "your-repo",
+
+	// Where your frequently edited prompt lives
+	"promptPath": ".awt/prompts/debug.md",
+
+	// Engine and limits
+	"engine": "claude",
+	"summarizePerJobKB": 512,
+	"summarizeTotalMB": 5,
+
+	// Polling cadences (seconds)
+	"pollSecIdle": 60,
+	"pollSecPostPush": 20,
+	"idleSec": 300,
+
+	// Event mode (optional one-shot path when CI provides env)
+	"eventMode": false,
+
+	// Cap PR comments included
+	"maxRecentComments": 30
+}
