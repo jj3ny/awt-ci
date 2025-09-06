@@ -10,8 +10,8 @@
 		"node": ">=20"
 	},
 	"scripts": {
-		"build": "tsup",
-		"prepare": "tsup",
+		"build": "tsup && npx -y @biomejs/biome@latest check dist/ --write --unsafe",
+		"prepare": "tsup && npx -y @biomejs/biome@latest check dist/ --write --unsafe",
 		"dev": "tsx src/index.ts",
 		"start": "node dist/index.js",
 		"link": "npm run build && npm i -g ."
