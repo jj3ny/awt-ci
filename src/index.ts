@@ -73,25 +73,39 @@ yargs(hideBin(process.argv))
 	)
 	.command(
 		"gather",
-		"Gather CI failure context and print/copy",
+		"Gather CI failures since last push (remote-only), summarize, and write a markdown report",
 		(y) =>
 			y
 				.option("wt", {
 					type: "string",
-					desc: "worktree name",
+					desc: "worktree name (uses its current branch's *remote* counterpart)",
 				})
 				.option("engine", {
 					choices: ["claude", "gemini"] as const,
 					default: "claude",
 				})
-				.option("copy", {
-					type: "boolean",
-					default: true,
-					desc: "copy to clipboard (also prints to stdout)",
-				})
 				.option("branch", {
 					type: "string",
-					desc: "remote branch name (gather latest failure for this branch, even without a PR)",
+					desc: "remote branch name (gather for this branch if no worktree)",
+				})
+				.option("force", {
+					type: "boolean",
+					default: false,
+					desc: "proceed even if CI is still in progress",
+				})
+				.option("skip-claude", {
+					type: "boolean",
+					default: false,
+					desc: "skip Claude/Gemini summary",
+				})
+				.option("claude-only", {
+					type: "boolean",
+					default: false,
+					desc: "include only Claude/Gemini summary (omit raw failure lines)",
+				})
+				.option("out", {
+					type: "string",
+					desc: "optional explicit output file path",
 				})
 				.check((argv) => {
 					if (!argv.wt && !argv.branch) {
@@ -100,9 +114,25 @@ yargs(hideBin(process.argv))
 					return true;
 				}),
 		async (argv) => {
-			const { wt = "", engine, copy, branch } = argv as any;
+			const {
+				wt = "",
+				engine,
+				force,
+				skipClaude,
+				claudeOnly,
+				branch,
+				out,
+			} = argv as any;
 			const { gather } = await import("./gather.js");
-			await gather({ worktree: wt, engine, copy, branch });
+			await gather({
+				worktree: wt,
+				engine,
+				force,
+				skipClaude,
+				claudeOnly,
+				branch,
+				out,
+			});
 		},
 	)
 	.command(

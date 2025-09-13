@@ -132,3 +132,53 @@ export async function safeRead(
 		return fallback;
 	}
 }
+
+export async function ensureDir(dir: string): Promise<void> {
+	await fs.mkdir(dir, { recursive: true });
+}
+
+export async function pathExists(p: string): Promise<boolean> {
+	try {
+	await fs.access(p);
+	return true;
+	} catch {
+	return false;
+	}
+}
+
+export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+	const tmp = `${filePath}.${randomUUID()}.tmp`;
+	await fs.writeFile(tmp, content, "utf8");
+	await fs.rename(tmp, filePath);
+}
+
+export function nowStampUTC(): string {
+	const d = new Date();
+	const pad = (n: number) => n.toString().padStart(2, "0");
+	return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}_${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}`;
+}
+
+export function shortenSha(sha: string, n = 7): string {
+	return sha ? sha.slice(0, n) : "";
+}
+
+export const ansi = {
+	reset: "\x1b[0m",
+	bold: "\x1b[1m",
+	dim: "\x1b[2m",
+	red: "\x1b[31m",
+	green: "\x1b[32m",
+	yellow: "\x1b[33m",
+	blue: "\x1b[34m",
+	magenta: "\x1b[35m",
+	cyan: "\x1b[36m",
+};
+
+export function color(c: keyof typeof ansi, text: string): string {
+	return `${ansi[c]}${text}${ansi.reset}`;
+}
+
+export function homePathDisplay(p: string): string {
+	const home = process.env.HOME || process.env.USERPROFILE || "";
+	return home && p.startsWith(home) ? p.replace(home, "~") : p;
+}

@@ -300,7 +300,7 @@ export class Gh {
 		ref: RepoRef,
 		runId: number,
 	): Promise<
-		{ id: number; name: string; html_url: string; conclusion: string | null }[]
+		{ id: number; name: string; html_url: string; conclusion: string | null; status: string | null }[]
 	> {
 		const { data } = await this.octo.actions.listJobsForWorkflowRun({
 			...ref,
@@ -312,6 +312,7 @@ export class Gh {
 			name: j.name,
 			html_url: j.html_url || "",
 			conclusion: j.conclusion || null,
+			status: j.status || null,
 		}));
 	}
 
@@ -397,6 +398,42 @@ export class Gh {
 			return data[0]?.number ?? null;
 		} catch {
 			return null;
+		}
+	}
+
+	async listWorkflowRunsSince(
+		ref: RepoRef,
+		branch: string,
+		sinceIso: string,
+		perPage = 100,
+	): Promise<{
+		id: number;
+		url: string;
+		status: string;
+		conclusion: string | null;
+		createdAt: string | null;
+		name: string | null;
+		headSha: string | null;
+	}[]> {
+		try {
+			const res = await this.octo.actions.listWorkflowRunsForRepo({
+				...ref,
+				branch,
+				per_page: Math.min(100, Math.max(1, perPage)),
+				// GitHub supports 'created' filter with qualifiers like '>=YYYY-MM-DD'
+				created: `>=${sinceIso}`,
+			});
+			return res.data.workflow_runs.map((r: any) => ({
+				id: r.id as number,
+				url: r.html_url || "",
+				status: r.status || "queued",
+				conclusion: r.conclusion || null,
+				createdAt: r.run_started_at || r.created_at || r.updated_at || null,
+				name: r.name || null,
+				headSha: r.head_sha || null,
+			}));
+		} catch {
+			return [];
 		}
 	}
 }

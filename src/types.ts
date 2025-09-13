@@ -36,3 +36,83 @@ export interface FailureBundle {
 	jobs: { id: number; runId: number; name: string; html_url: string }[];
 	logs: { jobId: number; runId: number; jobName: string; text: string }[];
 }
+
+// New types for curated run/job extracts
+
+export interface RunBrief {
+	id: number;
+	url: string;
+	status: string; // queued|in_progress|completed
+	conclusion: string | null; // success|failure|cancelled|timed_out|null
+	createdAt: string | null;
+	name: string | null;
+	headSha?: string | null;
+}
+
+export interface JobBrief {
+	id: number;
+	runId: number;
+	name: string;
+	html_url: string;
+	conclusion: string | null;
+	status?: string | null;
+}
+
+export interface ExtractCounts {
+	error: number;
+	failed: number;
+	xfail: number;
+	lines: number;
+	chars: number;
+}
+
+export interface JobExtract {
+	job: JobBrief;
+	excerpt: string; // curated failure lines + optional summary block
+	counts: ExtractCounts;
+}
+
+export interface RunExtract {
+	run: RunBrief;
+	jobs: JobExtract[];
+	totalCounts: ExtractCounts;
+}
+
+export interface GatherFlags {
+	force: boolean;
+	skipClaude: boolean;
+	claudeOnly: boolean;
+}
+
+export interface BuildReportInput {
+	owner: string;
+	repo: string;
+	branch: string;
+	sha: string;
+	sinceIso: string;
+	prNumber: number | null;
+	commentsSince: { author: string; createdAt: string; body: string; url: string }[];
+	runExtracts: RunExtract[];
+	ghAstGrepForRun: (runId: number) => string;
+	claudeSummary?: string;
+	flags: GatherFlags;
+}
+
+export interface BuildReportOutput {
+	markdown: string;
+	lengths: {
+		commentsSectionChars: number;
+		ciSectionChars: number;
+		claudeSectionChars: number;
+		totalChars: number;
+	};
+	perRunJobCounts: {
+		runId: number;
+		jobName: string;
+		error: number;
+		failed: number;
+		xfail: number;
+		lines: number;
+		chars: number;
+	}[];
+}

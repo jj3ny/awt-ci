@@ -11,43 +11,45 @@ import {
 } from "./git.js";
 import { Gh } from "./github.js";
 import { readState } from "./state.js";
-import { buildAgentPayload, summarizeFailures } from "./summarize.js";
-import type { Engine, WatchConfig } from "./types.js";
-import { copyToClipboard, getGhToken, readJsonc, safeRead } from "./util.js";
+import { buildAgentPayload, summarizeFailures, summarizeErrorExcerptText } from "./summarize.js";
+import type { Engine, WatchConfig, RunBrief, JobBrief, RunExtract, GatherFlags } from "./types.js";
+import { getGhToken, readJsonc, safeRead, pathExists, ensureDir, writeFileAtomic, nowStampUTC, shortenSha, color, homePathDisplay } from "./util.js";
+import { buildReportFilename, buildMarkdownXmlReport, toRunExtract } from "./report.js";
 
 export async function gather(opts: {
     worktree: string;
     engine: Engine;
-    copy: boolean;
+	force: boolean;
+	skipClaude: boolean;
+	claudeOnly: boolean;
     branch?: string;
+	out?: string;
 }) {
 	const wt = opts.worktree;
 	const root = await repoRoot();
 	const repoBase = path.basename(root);
     const wtPath = repoRootForWorktree(repoBase, wt);
     const branchMode = !!opts.branch;
+
     let wtExists = true;
     try {
-        await fs.access(wtPath);
+		await fs.access(wtPath);
     } catch {
-        wtExists = false;
+		wtExists = false;
     }
-    // If a remote branch is specified, do not require a worktree
     if (!wtExists && !branchMode) {
-        process.stderr.write(
-            `Worktree '${wt}' not found at ${wtPath}. Create it or use --branch to target a remote branch.\n`,
-        );
-        process.exitCode = 1;
-        return;
+		process.stderr.write(
+			`Worktree '${wt}' not found at ${wtPath}. Create it or use --branch to target a remote branch.\n`,
+		);
+		process.exitCode = 1;
+		return;
     }
-    // Choose context path for local file reads and tooling
     const ctxPath = wtExists ? wtPath : root;
 
+	// Load config.jsonc if present
 	const cfgPath = path.join(root, ".awt", "config.jsonc");
 	const cfg = (await readJsonc<WatchConfig>(cfgPath)) || {};
 	const engine = cfg.engine || opts.engine;
-	const summarizePerJobKB = cfg.summarizePerJobKB ?? 512;
-	const summarizeTotalMB = cfg.summarizeTotalMB ?? 5;
 	const promptPath = cfg.promptPath
 		? path.join(root, cfg.promptPath)
 		: path.join(root, ".awt", "prompts", "debug.md");
@@ -59,280 +61,259 @@ export async function gather(opts: {
 	const ghToken = await getGhToken();
 	const gh = new Gh(ghToken || undefined);
 
-	const state = await readState(root);
-	const warnings: string[] = [];
+	// Determine owner/repo from origin
 	const ownerRepo =
 		cfg.owner && cfg.repo
 			? { owner: cfg.owner, repo: cfg.repo }
 			: await originOwnerRepo(ctxPath).catch(async () => originOwnerRepo(root));
 	const { owner, repo } = ownerRepo;
-    const branch = wtExists
-        ? await currentBranch(wtPath).catch(() => "detached")
-        : "detached";
-    let prNumber: number | null = null;
-    if (!opts.branch && branch && branch !== "detached") {
-        prNumber = await gh
-            .findOpenPrForBranch({ owner, repo }, owner, branch)
-            .catch(() => null);
-    }
 
-    // Determine target branch and remote HEAD strictly (remote-first behavior)
-    let targetBranch: string | null = opts.branch || (branch !== "detached" ? branch : null);
-    let sha: string | null = null;
-    if (targetBranch) {
-        sha =
-            (await remoteHeadSha(ctxPath, targetBranch).catch(async () =>
-                remoteHeadSha(root, targetBranch),
-            )) || null;
-        if (!sha) {
-            // Try GitHub API for branch ref
-            sha = await gh.getBranchSha({ owner, repo }, targetBranch);
-        }
-        if (!sha) {
-            // As a last remote check for this branch, use latest workflow runs to infer head_sha
-            sha = await gh.headShaForBranch({ owner, repo }, targetBranch);
-        }
-    }
+	// Resolve target branch (remote-only)
+	const localBranch = wtExists
+		? await currentBranch(wtPath).catch(() => "detached")
+		: "detached";
+	const targetBranch: string | null =
+		opts.branch || (localBranch !== "detached" ? localBranch : null);
     if (!targetBranch) {
-        const msg = `Cannot determine current branch for worktree '${wt}'. Specify --branch <remote-branch>.`;
-        process.stderr.write(`${msg}\n`);
-        process.exitCode = 1;
-        return;
-    }
-    if (!sha) {
-        // If invoked by worktree (no --branch) and a PR exists, fall back to PR head SHA
-        if (!opts.branch && prNumber) {
-            try {
-                const prLite = await gh.getPrLite({ owner, repo }, prNumber);
-                sha = prLite?.headSha || null;
-            } catch {}
-        }
-        if (!sha) {
-            const msg = `Unable to resolve remote HEAD for branch '${targetBranch}'. Ensure the branch exists on 'origin' and try: git fetch origin ${targetBranch}`;
-            process.stderr.write(`${msg}\n`);
-            process.exitCode = 1;
-            return;
-        }
+		process.stderr.write(
+			`Cannot determine current branch for worktree '${wt}'. Specify --branch <remote-branch>.\n`,
+		);
+		process.exitCode = 1;
+		return;
     }
 
-	let text = "";
-	let isError = false; // When true, prefer STDERR output
-	let footerInfo: string | null = null; // extra info for stdout (not copied)
-    if (prNumber && sha) {
-		const ci = await gh
-			.latestCiForSha({ owner, repo }, sha)
-			.catch(() => ({ conclusion: null, runs: [] }));
+	// Resolve remote HEAD sha
+	let sha: string | null =
+		(await remoteHeadSha(ctxPath, targetBranch).catch(async () =>
+			remoteHeadSha(root, targetBranch),
+		)) || null;
+    if (!sha) {
+		// GitHub API fallback confirms remote existence
+		sha = await gh.getBranchSha({ owner, repo }, targetBranch);
+    }
+	if (!sha) {
+		process.stderr.write(
+			`No remote branch found for '${targetBranch}' on origin. Ensure it exists and fetch: git fetch origin ${targetBranch}\n`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	// Last push time = commit date of remote HEAD
+	let sinceIso: string | null = await gh.getCommitDate({ owner, repo }, sha);
+	if (!sinceIso) sinceIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+
+	// PR number and comments since last push
+	let prNumber: number | null = await gh
+		.findOpenPrForBranch({ owner, repo }, owner, targetBranch)
+		.catch(() => null);
+
+	let commentsSince: { author: string; createdAt: string; body: string; url: string }[] = [];
+	let totalRecentComments = 0;
+	if (prNumber) {
 		try {
-			const bundle = await gatherFailures(
+			commentsSince = await gh.listCommentsSince(
 				{ owner, repo },
 				prNumber,
-				sha,
-				gh,
-				summarizePerJobKB,
-				summarizeTotalMB,
+				sinceIso!,
+				cfg.maxRecentComments ?? 30,
 			);
-			if (bundle) {
-				const summary = await summarizeFailures(bundle, engine, {
-					cwd: ctxPath,
-					repo: { owner, repo },
-				});
-				// Determine remote push timestamp: earliest workflow run createdAt for this SHA
-				let sinceIso: string | null = null;
-				try {
-					const times = (ci.runs || [])
-						.map((r) => r.createdAt)
-						.filter((t): t is string => !!t)
-						.map((t) => new Date(t).getTime())
-						.filter((n) => Number.isFinite(n));
-					if (times.length) sinceIso = new Date(Math.min(...times)).toISOString();
-				} catch {}
-				if (!sinceIso) sinceIso = await gh.getCommitDate({ owner, repo }, sha);
-
-				let comments: { author: string; createdAt: string; body: string; url: string }[] = [];
-				let sinceCount = 0;
-				let priorCount = 0;
-				let priorLatest: string | null = null;
-				if (sinceIso) {
-					comments = await gh
-						.listCommentsSince(
-							{ owner, repo },
-							prNumber,
-							sinceIso,
-							cfg.maxRecentComments ?? 30,
-						)
-						.catch(() => []);
-					sinceCount = comments?.length || 0;
-					// Compute prior comment stats without widening the window
-					const recentAll = await gh
-						.listCommentsRecent(
-							{ owner, repo },
-							prNumber,
-							cfg.maxRecentComments ?? 30,
-						)
-						.catch(() => []);
-					const prior = recentAll.filter(
-						(c) => (c.createdAt || "") < (sinceIso || ""),
-					);
-					priorCount = prior.length;
-					priorLatest = prior.length
-						? prior[prior.length - 1]?.createdAt || null
-						: null;
-				} else {
-					warnings.push(
-						"Warning: Unable to determine remote push time; PR comments since last push omitted.",
-					);
-				}
-				const payload = await buildAgentPayload({
-					prNumber,
-					sha,
-					failureSummary: summary,
-					comments,
-					debugPrompt: prompt,
-					runs: ci.runs.map((r) => ({
-						url: r.url,
-						conclusion: r.conclusion || null,
-					})),
-					pushedAtIso: sinceIso || undefined,
-				});
-				text = payload.text;
-				// Footer info: PR and run age + comment counts
-				const createdAt = ci.runs[0]?.createdAt || sinceIso || "";
-				const age = formatAge(createdAt);
-				const priorDelta = priorLatest
-					? `${formatDelta(
-							new Date((sinceIso || createdAt) as string).getTime() -
-								new Date(priorLatest).getTime(),
-						)} before last push`
-					: "no prior comments";
-				footerInfo = sinceIso
-					? `Source: PR #${prNumber} (branch '${targetBranch}'), run age: ${age}; comments since last push: ${sinceCount}, prior: ${priorCount} (${priorDelta})`
-					: `Source: PR #${prNumber} (branch '${targetBranch}'), run age: ${age}; comments since last push: unavailable`;
-			} else {
-				text = `No failing runs found for PR #${prNumber} on ${sha.slice(0, 7)}. Latest CI: ${ci.conclusion || "unknown"}.`;
-				isError = true;
-			}
-		} catch (_e) {
-			// Could not gather context (API or other failure)
-			text = `Unable to gather CI context for PR #${prNumber} on ${sha.slice(0, 7)}.`;
-			if (process.env.AWT_DEBUG) {
-				const msg = _e instanceof Error ? _e.stack || _e.message : String(_e);
-				process.stderr.write(`[awt-ci debug] ${msg}\n`);
-			}
-			isError = true;
-		}
-    } else if (sha && targetBranch) {
-		// Branch-only mode: gather for latest CI failure on this branch
-		let effectiveSha = sha;
-		let ci = await gh
-			.latestCiForSha({ owner, repo }, effectiveSha)
-			.catch(() => ({ conclusion: null, runs: [] }));
-		// If HEAD has no runs yet, fall back to the latest run's head_sha for the branch
-		if ((!ci.runs || ci.runs.length === 0) && opts.branch) {
-			try {
-				const lastRunSha = await gh.headShaForBranch(
-					{ owner, repo },
-					targetBranch,
-				);
-				if (lastRunSha && lastRunSha !== effectiveSha) {
-					effectiveSha = lastRunSha;
-					ci = await gh
-						.latestCiForSha({ owner, repo }, effectiveSha)
-						.catch(() => ({ conclusion: null, runs: [] }));
-				}
-			} catch {}
-		}
-		try {
-			let bundle = await gatherFailures(
-				{ owner, repo },
-				0, // sentinel: no PR
-				effectiveSha,
-				gh,
-				summarizePerJobKB,
-				summarizeTotalMB,
-			);
-
-			// If there are runs but none failing for this SHA, try the most recent failing run on this branch
-			if (!bundle && opts.branch) {
-				try {
-					const failingSha = await gh.latestFailingShaForBranch(
-						{ owner, repo },
-						targetBranch,
-					);
-					if (failingSha && failingSha !== effectiveSha) {
-						effectiveSha = failingSha;
-						ci = await gh
-							.latestCiForSha({ owner, repo }, effectiveSha)
-							.catch(() => ({ conclusion: null, runs: [] }));
-						bundle = await gatherFailures(
-							{ owner, repo },
-							0,
-							effectiveSha,
-							gh,
-							summarizePerJobKB,
-							summarizeTotalMB,
-						);
-					}
-				} catch {}
-			}
-			if (bundle) {
-				const summary = await summarizeFailures(bundle, engine, {
-					cwd: ctxPath,
-					repo: { owner, repo },
-				});
-				// No PR comments in branch mode
-				const payload = await buildAgentPayload({
-					prNumber: 0,
-					sha: effectiveSha,
-					failureSummary: summary,
-					comments: [],
-					debugPrompt: prompt,
-					runs: ci.runs.map((r) => ({
-						url: r.url,
-						conclusion: r.conclusion || null,
-					})),
-				});
-				text = payload.text;
-            const createdAt =
-                ci.runs[0]?.createdAt ||
-                (await gh.getCommitDate({ owner, repo }, effectiveSha)) ||
-                new Date(0).toISOString();
-            const age = formatAge(createdAt);
-            footerInfo = `Source: branch '${targetBranch}' (sha ${effectiveSha.slice(0, 7)}), run age: ${age}`;
-        } else {
-            text = `No failing runs found for branch '${targetBranch}' on ${effectiveSha.slice(0, 7)}. Latest CI: ${ci.conclusion || "unknown"}.`;
-            isError = true;
-        }
-		} catch (_e) {
-			text = `Unable to gather CI context for branch '${targetBranch}' on ${effectiveSha.slice(0, 7)}.`;
-			if (process.env.AWT_DEBUG) {
-				const msg = _e instanceof Error ? _e.stack || _e.message : String(_e);
-				process.stderr.write(`[awt-ci debug] ${msg}\n`);
-			}
-			isError = true;
+			const recentAll = await gh.listCommentsRecent({ owner, repo }, prNumber, 100);
+			totalRecentComments = recentAll.length;
+		} catch {
+			commentsSince = [];
 		}
 	}
 
-	// Append any warnings into output text and also echo to stderr
-	if (warnings.length) {
-		text += `\n\n${warnings.join("\n")}`;
-	}
+	// Workflow runs since last push
+	const runsSince = await gh.listWorkflowRunsSince({ owner, repo }, targetBranch, sinceIso!);
+	const failureLike = new Set(["failure", "timed_out", "cancelled"]);
+	const inProgress = runsSince.filter((r) => r.status !== "completed");
+	const completedFailing = runsSince.filter(
+		(r) => r.status === "completed" && r.conclusion && failureLike.has(r.conclusion),
+	);
 
-	// Always print the payload to stdout/stderr
-	if (isError) process.stderr.write(`${text}\n`);
-	else process.stdout.write(`${text}\n`);
-	if (footerInfo) process.stdout.write(`\n${footerInfo}\n`);
-	for (const w of warnings) process.stderr.write(`${w}\n`);
-
-	// Also copy to clipboard unless disabled
-	if (opts.copy) {
-		const ok = await copyToClipboard(text);
-		const msg = ok
-			? "(copied to clipboard)"
-			: isError
-				? "(clipboard utility not found; printed to stderr)"
-				: "(clipboard utility not found; printed to stdout)";
+	if (inProgress.length && !opts.force) {
+		const msg = [
+			`CI is still in progress for branch '${targetBranch}' (since ${sinceIso}).`,
+			`Pending runs: ${inProgress.map((r) => `#${r.id}`).join(", ") || "(none)"}`,
+			`Re-run with --force to compile partial information now.`,
+		].join("\n");
 		process.stderr.write(`${msg}\n`);
+		process.exitCode = 2;
+		return;
 	}
+
+	// Build run extracts (completed failing first, then forced in-progress)
+	const runExtracts: RunExtract[] = [];
+	const includedRunIds: number[] = [];
+
+	async function fetchRunExtract(run: RunBrief): Promise<RunExtract | null> {
+		const jobs = await gh.listJobsForRun({ owner, repo }, run.id);
+		const failingJobs: JobBrief[] = jobs
+			.filter(
+				(j) =>
+					(j.conclusion && failureLike.has(j.conclusion)) ||
+					(run.status !== "completed" &&
+						j.status === "completed" &&
+						j.conclusion &&
+						failureLike.has(j.conclusion)),
+			)
+			.map((j) => ({
+				id: j.id,
+				runId: run.id,
+				name: j.name,
+				html_url: j.html_url,
+				conclusion: j.conclusion,
+				status: j.status ?? null,
+			}));
+
+		if (!failingJobs.length && run.status !== "completed") {
+			if (opts.force) {
+				return {
+					run,
+					jobs: [],
+					totalCounts: { error: 0, failed: 0, xfail: 0, lines: 0, chars: 0 },
+				};
+			}
+			return null;
+		}
+
+		const jobLogs: Record<number, string> = {};
+		for (const j of failingJobs) {
+			try {
+				const raw = await gh.fetchJobLog({ owner, repo }, j.id);
+				jobLogs[j.id] = raw;
+			} catch {
+				jobLogs[j.id] = "(unable to fetch logs for this job; open in browser)";
+			}
+		}
+		return toRunExtract(run, failingJobs, jobLogs);
+	}
+
+	for (const r of completedFailing) {
+		const ex = await fetchRunExtract(r as RunBrief);
+		if (ex) {
+			runExtracts.push(ex);
+			includedRunIds.push(r.id);
+        }
+	}
+	if (opts.force) {
+		for (const r of inProgress) {
+			const ex = await fetchRunExtract(r as RunBrief);
+			if (ex) {
+				runExtracts.push(ex);
+				includedRunIds.push(r.id);
+			}
+		}
+	}
+
+	// Curated excerpt for model summarization
+	const curatedExcerpt = runExtracts
+		.flatMap((rx) =>
+			rx.jobs.map((jx) => [`===== RUN ${rx.run.id} — ${rx.run.name ?? "Workflow"} — JOB ${jx.job.name} =====`, jx.excerpt].join("\n")),
+		)
+		.join("\n\n");
+
+	// Summarize (unless skipped)
+	let claudeSummary: string | undefined;
+	if (!opts.skipClaude) {
+		try {
+			claudeSummary = await summarizeErrorExcerptText(curatedExcerpt, engine, {
+				cwd: ctxPath,
+				repo: { owner, repo },
+				prNumber,
+				sha,
+				runIds: includedRunIds,
+			});
+		} catch {
+			claudeSummary = undefined;
+		}
+	}
+
+	// Build XML-marked markdown report
+	const flags: GatherFlags = {
+		force: !!opts.force,
+		skipClaude: !!opts.skipClaude,
+		claudeOnly: !!opts.claudeOnly,
+	};
+	const report = buildMarkdownXmlReport({
+		owner,
+		repo,
+		branch: targetBranch,
+		sha,
+		sinceIso: sinceIso!,
+		prNumber,
+		commentsSince,
+		runExtracts,
+		ghAstGrepForRun: (runId: number) =>
+			[
+				`sg -p "/\\\\b(ERROR|FAILED|XFAIL)\\\\b/" <(gh run view ${runId} --log) || true`,
+				`# fallback:\nrg -n -i " (ERROR|FAILED|XFAIL) " <(gh run view ${runId} --log) || true`,
+			].join("\n"),
+		claudeSummary,
+		flags,
+	});
+
+	// Decide output path
+	let outDir = wtExists ? path.join(wtPath, "docs", "tmp") : path.resolve(process.cwd());
+	if (!(await pathExists(outDir))) {
+		// Fallback to worktree root (or cwd)
+		outDir = wtExists ? wtPath : path.resolve(process.cwd());
+	} else {
+		await ensureDir(outDir);
+	}
+
+	if (opts.out) {
+		outDir = path.dirname(path.resolve(opts.out));
+		await ensureDir(outDir);
+	}
+	const stamp = nowStampUTC();
+	const fileName = opts.out
+		? path.basename(opts.out)
+		: buildReportFilename(repoBase, targetBranch, shortenSha(sha), stamp);
+	const filePath = path.join(outDir, fileName);
+	await writeFileAtomic(filePath, report.markdown);
+
+	// Console summary
+	const c = (k: any, s: string) => color(k as any, s);
+	const totalErr = runExtracts.reduce((a, r) => a + r.totalCounts.error, 0);
+	const totalFail = runExtracts.reduce((a, r) => a + r.totalCounts.failed, 0);
+	const totalXf = runExtracts.reduce((a, r) => a + r.totalCounts.xfail, 0);
+	const totalLines = runExtracts.reduce((a, r) => a + r.totalCounts.lines, 0);
+
+	process.stdout.write(
+		[
+			`${c("bold", "AWT Gather Summary")}`,
+			`  repo:        ${owner}/${repo}`,
+			`  branch:      ${c("cyan", targetBranch)}  sha: ${shortenSha(sha)}`,
+			`  PR:          ${prNumber ? c("yellow", `#${prNumber}`) : "(none)"}`,
+			`  comments:    total recent=${totalRecentComments}, since last push=${commentsSince.length}`,
+			...commentsSince
+				.slice(0, 8)
+				.map((cmt) => `    - @${cmt.author}: ${(cmt.body || "").split(/\r?\n/)[0]?.slice(0, 80) || ""}`),
+			`  runs:        ${runExtracts.length} included (${includedRunIds.map((id) => `#${id}`).join(", ") || "-"})`,
+			`  captured:    ${c("red", `ERROR:${totalErr}`)}  ${c("red", `FAILED:${totalFail}`)}  ${c(
+				"magenta",
+				`XFAIL:${totalXf}`,
+			)}  lines:${totalLines}`,
+			`  sizes:       comments=${report.lengths.commentsSectionChars}  ci=${report.lengths.ciSectionChars}  claude=${report.lengths.claudeSectionChars}  total=${report.lengths.totalChars}`,
+			`  output:      ${homePathDisplay(filePath)}`,
+			"",
+			...runExtracts.flatMap((rx) => {
+				const header = `  run #${rx.run.id} ${rx.run.name ? `(${rx.run.name})` : ""} — ${rx.run.status}/${rx.run.conclusion ?? ""}`;
+				const jobLines = rx.jobs.map(
+					(jx) =>
+						`    • ${jx.job.name}  ${c("red", `E:${jx.counts.error}`)} ${c("red", `F:${jx.counts.failed}`)} ${c(
+							"magenta",
+							`XF:${jx.counts.xfail}`,
+						)}  lines:${jx.counts.lines} chars:${jx.counts.chars}`,
+				);
+				return [header, ...jobLines];
+			}),
+			"",
+		].join("\n"),
+	);
 }
 
 // safeRead moved to util.ts

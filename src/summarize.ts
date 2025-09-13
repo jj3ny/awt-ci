@@ -45,6 +45,58 @@ export async function summarizeFailures(
 	return heuristicSummary(bundle, opts.repo);
 }
 
+export async function summarizeErrorExcerptText(
+	excerpt: string,
+	engine: Engine,
+	opts: { cwd: string; repo: RepoRef; prNumber?: number | null; sha: string; runIds?: number[] },
+): Promise<string> {
+	const header: string[] = [];
+	header.push(
+		`You are assisting as a senior engineer triaging CI failures for ${opts.repo.owner}/${opts.repo.repo}.`,
+	);
+	if (opts.prNumber && opts.prNumber > 0) {
+		header.push(`Produce a concise, actionable report for PR #${opts.prNumber} (SHA ${opts.sha.slice(0, 7)}).`);
+	} else {
+		header.push(`Produce a concise, actionable report for branch SHA ${opts.sha.slice(0, 7)}.`);
+	}
+	header.push(
+		`Input contains only failure lines (ERROR/FAILED/XFAIL) and possibly the pytest "short test summary info" block extracted from CI logs since the last push.`,
+	);
+	header.push(
+		`For each failing area: (1) identify failing tests/files with file::line if visible, (2) include 1-2 key quoted lines, (3) likely root cause, (4) minimal next actions, (5) exact gh commands to inspect details.`,
+	);
+	header.push(
+		`Prefer precise, copy-pasteable commands. If unsure, include useful 'gh run view <id> --log | rg -n -i " (ERROR|FAILED|XFAIL) "' commands. Suggest ast-grep queries to pinpoint code patterns.`,
+	);
+	if (opts.runIds?.length) {
+		header.push(`Relevant CI runs:\n${opts.runIds.map((id) => `- gh run view ${id} --log | less`).join("\n")}`);
+	}
+
+	const prompt = `${header.join("\n")}\n\n===== FAILURE EXCERPT START =====\n${excerpt}\n===== FAILURE EXCERPT END =====\n`;
+
+	try {
+		delete (process.env as any).ANTHROPIC_API_KEY;
+		delete (process.env as any).CLAUDE_API_KEY;
+		delete (process.env as any).ANTHROPIC_AUTH_TOKEN;
+		delete (process.env as any).ANTHROPIC_BASE_URL;
+		delete (process.env as any).ANTHROPIC_API_URL;
+		const { query } = await import("@anthropic-ai/claude-code");
+		const primaryModel = process.env.AWT_CLAUDE_MODEL || "claude-sonnet-4-0";
+		const fallbackModel = process.env.AWT_CLAUDE_FALLBACK || "claude-opus-4-1";
+		const summary = await runClaudeQuery(query, prompt, opts.cwd, primaryModel);
+		if (summary) return summary;
+		const summary2 = await runClaudeQuery(query, prompt, opts.cwd, fallbackModel);
+		if (summary2) return summary2;
+	} catch {}
+
+	if (engine === "gemini" || process.env.GOOGLE_API_KEY) {
+		const g = await runGemini(prompt);
+		if (g) return g;
+	}
+	// Minimal fallback
+	return `Unable to generate model summary. Key lines (tail):\n${excerpt.split(/\n/).slice(-50).join("\n")}`;
+}
+
 function buildClaudePrompt(bundle: FailureBundle, repo: RepoRef): string {
 	const header: string[] = [];
 	header.push(

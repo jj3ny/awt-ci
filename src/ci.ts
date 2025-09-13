@@ -2,6 +2,9 @@ import type { Gh } from "./github.js";
 import type { FailureBundle, RepoRef } from "./types.js";
 import { truncateByKB } from "./util.js";
 
+// Existing bundle-oriented helpers remain for watch-mode workflows.
+// The new gather flow constructs curated excerpts in report.ts based on runs since last push.
+
 export async function gatherFailures(
 	ref: RepoRef,
 	pr: number,
