@@ -18,6 +18,10 @@ yargs(hideBin(process.argv))
 					choices: ["claude", "gemini"] as const,
 					default: "claude",
 				})
+				.option("mux", {
+					choices: ["tmux", "zellij"] as const,
+					desc: "Terminal multiplexer (defaults to AWT_MULTIPLEXER env or zellij)",
+				})
 				.option("idle-sec", { type: "number", default: 300 })
 				.option("poll-sec-idle", { type: "number", default: 60 })
 				.option("poll-sec-post-push", { type: "number", default: 20 })
@@ -31,12 +35,17 @@ yargs(hideBin(process.argv))
 			const {
 				wt,
 				engine,
+				mux,
 				idleSec,
 				pollSecIdle,
 				pollSecPostPush,
 				eventMode,
 				foreground,
 			} = argv as any;
+
+			if (mux) {
+				process.env.AWT_MULTIPLEXER = mux;
+			}
 
 			// Detach by default unless explicitly in event mode or foreground
 			if (!eventMode && !foreground) {

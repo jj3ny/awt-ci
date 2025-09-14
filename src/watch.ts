@@ -10,16 +10,23 @@ import {
 import { Gh } from "./github.js";
 import { readState, writeState } from "./state.js";
 import { buildAgentPayload, summarizeFailures } from "./summarize.js";
-import {
+import type { Engine, WatchConfig } from "./types.js";
+import { getGhToken, readJsonc, safeRead, sleep } from "./util.js";
+
+// Dynamic import for multiplexer support
+const MUX = process.env.AWT_MULTIPLEXER || "zellij";
+const muxModule = MUX === "zellij"
+	? await import("./zellij.js")
+	: await import("./tmux.js");
+
+const {
 	notifyAll,
 	paneHistorySig,
 	pasteAndEnter,
 	resolvePrimaryPane,
 	resolveRepoSessionNameOrScan,
 	windowNameForWt,
-} from "./tmux.js";
-import type { Engine, WatchConfig } from "./types.js";
-import { getGhToken, readJsonc, safeRead, sleep } from "./util.js";
+} = muxModule;
 
 export async function watch(opts: {
 	worktree: string;

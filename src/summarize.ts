@@ -325,7 +325,6 @@ export async function buildAgentPayload(args: {
 	}
 	lines.push("\n## Summary of Failures");
 	lines.push(args.failureSummary);
-		lines.push("</ci-context>");
 	if (args.prNumber && args.prNumber > 0 && args.comments?.length) {
 		lines.push(`\n## Comments since ${args.pushedAtIso || "last push"}`);
 		for (const c of args.comments)

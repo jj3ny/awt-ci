@@ -284,5 +284,10 @@ export function buildMarkdownXmlReport(input: BuildReportInput): BuildReportOutp
 }
 
 function escapeXmlAttr(s: string): string {
-    return s.replace(/&/g, "&").replace(/"/g, """).replace(/</g, "<").replace(/>/g, ">");
+    // Properly escape XML attribute characters.
+    return s
+        .replace(/&/g, "&")
+        .replace(/"/g, """)
+        .replace(/</g, "<")
+        .replace(/>/g, ">");
 }
