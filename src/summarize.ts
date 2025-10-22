@@ -1,7 +1,16 @@
 import type { Engine, FailureBundle, RepoRef } from "./types.js";
 
 // Optional Gemini fallback
-let GoogleGenerativeAI: any = null;
+type GoogleAI = {
+	new (
+		apiKey: string,
+	): {
+		getGenerativeModel(config: { model: string }): {
+			generateContent(text: string): Promise<unknown>;
+		};
+	};
+};
+let GoogleGenerativeAI: GoogleAI | null = null;
 try {
 	({ GoogleGenerativeAI } = await import("@google/generative-ai"));
 } catch {}
@@ -15,11 +24,12 @@ export async function summarizeFailures(
 	const prompt = buildClaudePrompt(bundle, opts.repo);
 	try {
 		// Ensure subscription-based auth (Claude Code runtime) and avoid API billing
-		delete (process.env as any).ANTHROPIC_API_KEY;
-		delete (process.env as any).CLAUDE_API_KEY;
-		delete (process.env as any).ANTHROPIC_AUTH_TOKEN;
-		delete (process.env as any).ANTHROPIC_BASE_URL;
-		delete (process.env as any).ANTHROPIC_API_URL;
+		const env = process.env as Record<string, string | undefined>;
+		delete env.ANTHROPIC_API_KEY;
+		delete env.CLAUDE_API_KEY;
+		delete env.ANTHROPIC_AUTH_TOKEN;
+		delete env.ANTHROPIC_BASE_URL;
+		delete env.ANTHROPIC_API_URL;
 		const { query } = await import("@anthropic-ai/claude-code");
 		const primaryModel = process.env.AWT_CLAUDE_MODEL || "claude-sonnet-4-0";
 		const fallbackModel = process.env.AWT_CLAUDE_FALLBACK || "claude-opus-4-1";
@@ -87,11 +97,12 @@ export async function summarizeErrorExcerptText(
 	const prompt = `${header.join("\n")}\n\n===== FAILURE EXCERPT START =====\n${excerpt}\n===== FAILURE EXCERPT END =====\n`;
 
 	try {
-		delete (process.env as any).ANTHROPIC_API_KEY;
-		delete (process.env as any).CLAUDE_API_KEY;
-		delete (process.env as any).ANTHROPIC_AUTH_TOKEN;
-		delete (process.env as any).ANTHROPIC_BASE_URL;
-		delete (process.env as any).ANTHROPIC_API_URL;
+		const env = process.env as Record<string, string | undefined>;
+		delete env.ANTHROPIC_API_KEY;
+		delete env.CLAUDE_API_KEY;
+		delete env.ANTHROPIC_AUTH_TOKEN;
+		delete env.ANTHROPIC_BASE_URL;
+		delete env.ANTHROPIC_API_URL;
 		const { query } = await import("@anthropic-ai/claude-code");
 		const primaryModel = process.env.AWT_CLAUDE_MODEL || "claude-sonnet-4-0";
 		const fallbackModel = process.env.AWT_CLAUDE_FALLBACK || "claude-opus-4-1";
@@ -200,10 +211,23 @@ async function runGemini(text: string): Promise<string | null> {
 		const genai = new GoogleGenerativeAI(key);
 		const model = process.env.AWT_GEMINI_MODEL || "gemini-2.5-flash-lite";
 		const res = await genai.getGenerativeModel({ model }).generateContent(text);
+
+		// Type-safe response extraction
+		const response = res as {
+			response?: {
+				text?: () => string;
+				candidates?: Array<{
+					content?: {
+						parts?: Array<{ text?: string }>;
+					};
+				}>;
+			};
+		};
+
 		const out =
-			(res as any).response?.text?.() ||
-			(res as any).response?.candidates?.[0]?.content?.parts
-				?.map((p: any) => p.text)
+			response.response?.text?.() ||
+			response.response?.candidates?.[0]?.content?.parts
+				?.map((p) => p.text ?? "")
 				.join("\n");
 		return typeof out === "string" && out.trim().length ? out.trim() : null;
 	} catch {
@@ -211,13 +235,34 @@ async function runGemini(text: string): Promise<string | null> {
 	}
 }
 
+type QueryFunction = (args: {
+	prompt: string;
+	options: {
+		cwd: string;
+		model: string;
+		maxTurns: number;
+		allowedTools: string[];
+		canUseTool: (
+			toolName: string,
+			input: unknown,
+		) => Promise<{ behavior: string; message?: string }>;
+	};
+}) => AsyncIterable<{ type: string; text?: string }>;
+
+type Message = {
+	type: string;
+	text?: string;
+	subtype?: string;
+	result?: string;
+};
+
 async function runClaudeQuery(
-	queryFn: any,
+	queryFn: QueryFunction,
 	prompt: string,
 	cwd: string,
 	model: string,
 ): Promise<string | null> {
-	const messages: any[] = [];
+	const messages: Message[] = [];
 	for await (const message of queryFn({
 		prompt,
 		options: {
@@ -225,9 +270,10 @@ async function runClaudeQuery(
 			model,
 			maxTurns: 3,
 			allowedTools: ["Bash", "Read", "Grep", "WebSearch"],
-			canUseTool: async (toolName: string, input: any) => {
+			canUseTool: async (toolName: string, input: unknown) => {
 				if (toolName === "Bash") {
-					const cmd = String(input?.command || "");
+					const inputObj = input as { command?: string } | null | undefined;
+					const cmd = String(inputObj?.command ?? "");
 					if (/\b(rm|mv|chmod|chown|truncate|mkfs|dd|kill)\b/.test(cmd)) {
 						return {
 							behavior: "deny",
@@ -263,9 +309,9 @@ async function runClaudeQuery(
 		messages.push(message);
 	}
 	const result = messages.find(
-		(m: any) => m.type === "result" && m.subtype === "success",
+		(m) => m.type === "result" && m.subtype === "success",
 	);
-	return result?.result || null;
+	return result?.result ?? null;
 }
 
 function heuristicSummary(bundle: FailureBundle, repo: RepoRef): string {
@@ -347,7 +393,7 @@ export async function buildAgentPayload(args: {
 		for (const c of args.comments)
 			lines.push(`- @${c.author} (${c.createdAt}): ${c.body} — ${c.url}`);
 	}
-	if (args.logs && args.logs.length) {
+	if (args.logs?.length) {
 		lines.push("\n## Raw Logs (truncated)");
 		lines.push("<ci-logs>");
 		for (const l of args.logs) {

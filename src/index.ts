@@ -41,7 +41,7 @@ yargs(hideBin(process.argv))
 				pollSecPostPush,
 				eventMode,
 				foreground,
-			} = argv as any;
+			} = argv;
 
 			if (mux) {
 				process.env.AWT_MULTIPLEXER = mux;
@@ -131,7 +131,7 @@ yargs(hideBin(process.argv))
 				claudeOnly,
 				branch,
 				out,
-			} = argv as any;
+			} = argv;
 			const { gather } = await import("./gather.js");
 			await gather({
 				worktree: wt,
@@ -165,7 +165,7 @@ yargs(hideBin(process.argv))
 					desc: "create .awt/prompts/debug.md if missing",
 				}),
 		async (argv) => {
-			const { withHook, withConfig, withPrompt } = argv as any;
+			const { withHook, withConfig, withPrompt } = argv;
 			const { initRepo } = await import("./init.js");
 			await initRepo({
 				withHook: withHook,
@@ -185,7 +185,7 @@ yargs(hideBin(process.argv))
 				desc: "set git --global core.hooksPath",
 			}),
 		async (argv) => {
-			const { configureGit } = argv as any;
+			const { configureGit } = argv;
 			const { initGlobalHook } = await import("./init.js");
 			await initGlobalHook({ configureGit });
 			console.log("Installed guarded global pre-push hook.");
@@ -207,7 +207,7 @@ yargs(hideBin(process.argv))
 					desc: "worktree name for tmux window on the host",
 				}),
 		async (argv) => {
-			const { workflow, wt } = argv as any;
+			const { workflow, wt } = argv;
 			const { scaffoldEventWorkflow } = await import("./init.js");
 			await scaffoldEventWorkflow({ workflow, worktree: wt });
 			console.log("Created .github/workflows/awt-event-paste.yml");

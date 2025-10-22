@@ -1,9 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import { gatherFailures } from "./ci.js";
 import {
 	currentBranch,
-	headSha,
 	originOwnerRepo,
 	remoteHeadSha,
 	repoRoot,
@@ -15,12 +13,7 @@ import {
 	buildReportFilename,
 	toRunExtract,
 } from "./report.js";
-import { readState } from "./state.js";
-import {
-	buildAgentPayload,
-	summarizeErrorExcerptText,
-	summarizeFailures,
-} from "./summarize.js";
+import { summarizeErrorExcerptText } from "./summarize.js";
 import type {
 	Engine,
 	GatherFlags,
@@ -30,6 +23,7 @@ import type {
 	WatchConfig,
 } from "./types.js";
 import {
+	type ansi,
 	color,
 	ensureDir,
 	getGhToken,
@@ -79,7 +73,7 @@ export async function gather(opts: {
 	const promptPath = cfg.promptPath
 		? path.join(root, cfg.promptPath)
 		: path.join(root, ".awt", "prompts", "debug.md");
-	const prompt = await safeRead(
+	const _prompt = await safeRead(
 		promptPath,
 		"Please analyze the failures above and continue working to resolve them.",
 	);
@@ -126,9 +120,9 @@ export async function gather(opts: {
 	}
 
 	// Last push time = commit date of remote HEAD
-	let sinceIso: string | null = await gh.getCommitDate({ owner, repo }, sha);
-	if (!sinceIso)
-		sinceIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+	const sinceIso: string =
+		(await gh.getCommitDate({ owner, repo }, sha)) ||
+		new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 
 	// PR number and comments since last push
 	const prNumber: number | null = await gh
@@ -147,7 +141,7 @@ export async function gather(opts: {
 			commentsSince = await gh.listCommentsSince(
 				{ owner, repo },
 				prNumber,
-				sinceIso!,
+				sinceIso,
 				cfg.maxRecentComments ?? 30,
 			);
 			const recentAll = await gh.listCommentsRecent(
@@ -165,7 +159,7 @@ export async function gather(opts: {
 	const runsSince = await gh.listWorkflowRunsSince(
 		{ owner, repo },
 		targetBranch,
-		sinceIso!,
+		sinceIso,
 	);
 	const failureLike = new Set(["failure", "timed_out", "cancelled"]);
 	const inProgress = runsSince.filter((r) => r.status !== "completed");
@@ -288,7 +282,7 @@ export async function gather(opts: {
 		repo,
 		branch: targetBranch,
 		sha,
-		sinceIso: sinceIso!,
+		sinceIso,
 		prNumber,
 		commentsSince,
 		runExtracts,
@@ -324,7 +318,7 @@ export async function gather(opts: {
 	await writeFileAtomic(filePath, report.markdown);
 
 	// Console summary
-	const c = (k: any, s: string) => color(k as any, s);
+	const c = (k: keyof typeof ansi, s: string) => color(k, s);
 	const totalErr = runExtracts.reduce((a, r) => a + r.totalCounts.error, 0);
 	const totalFail = runExtracts.reduce((a, r) => a + r.totalCounts.failed, 0);
 	const totalXf = runExtracts.reduce((a, r) => a + r.totalCounts.xfail, 0);
@@ -369,7 +363,7 @@ export async function gather(opts: {
 
 // safeRead moved to util.ts
 
-function formatAge(iso: string): string {
+function _formatAge(iso: string): string {
 	try {
 		const t = new Date(iso).getTime();
 		if (!Number.isFinite(t)) return "unknown";
@@ -387,7 +381,7 @@ function formatAge(iso: string): string {
 	}
 }
 
-function formatDelta(ms: number): string {
+function _formatDelta(ms: number): string {
 	if (ms <= 0) return "0m";
 	const totalMin = Math.floor(ms / 60000);
 	const days = Math.floor(totalMin / (60 * 24));
