@@ -35,7 +35,7 @@
 		// "pre-commit install --install-hooks",
 		// "cp ../.env.example .env",
 		// "./scripts/setup-dev.sh"
-	]
+	],
 
 	// Auto-detected setup (when worktreeSetupCommands is not specified):
 	// 1. Makefile with 'install' target → make install
@@ -47,4 +47,14 @@
 	// 7. Cargo.toml → cargo fetch
 	// 8. .pre-commit-config.yaml → pre-commit install --install-hooks
 	// 9. Git hooks from main repo → copied to worktree
+
+	// === New (comments & consolidated watcher) ===
+	"preferGraphQL": true, // prefer GraphQL for comments when available
+	"commentsQuietSec": 120, // quiet window before posting consolidated payload
+	"commentsPollSec": 60, // how often to poll for comments while idle
+	"consolidatedPastePolicy": "on_failure", // or "always_on_settle"
+	"commentsCap": 500, // cap total comments across threads (keeps whole threads)
+	"emitCiJson": true, // (future) emit CI JSON alongside markdown
+	"emitCommentsJson": true, // emit comments JSON alongside markdown
+	"deprecations": true // print deprecation notices for legacy commands
 }

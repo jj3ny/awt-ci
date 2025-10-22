@@ -19,6 +19,16 @@
 	// Event mode (optional one-shot path when CI provides env)
 	"eventMode": false,
 
-	// Cap PR comments included
-	"maxRecentComments": 30
+	// Cap PR comments included (legacy)
+	"maxRecentComments": 30,
+
+	// === New (comments & consolidated watcher) ===
+	"preferGraphQL": true,
+	"commentsQuietSec": 120,
+	"commentsPollSec": 60,
+	"consolidatedPastePolicy": "on_failure",
+	"commentsCap": 500,
+	"emitCiJson": true,
+	"emitCommentsJson": true,
+	"deprecations": true
 }

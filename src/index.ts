@@ -81,7 +81,7 @@ yargs(hideBin(process.argv))
 		},
 	)
 	.command(
-		"gather",
+		["gather ci", "gather-ci"],
 		"Gather CI failures since last push (remote-only), summarize, and write a markdown report",
 		(y) =>
 			y
@@ -115,26 +115,115 @@ yargs(hideBin(process.argv))
 				.option("out", {
 					type: "string",
 					desc: "optional explicit output file path",
-				})
-				.check((argv) => {
-					if (!argv.wt && !argv.branch) {
-						throw new Error("Either --wt or --branch must be provided");
-					}
-					return true;
 				}),
 		async (argv) => {
-			const {
-				wt = "",
+			const { wt, engine, force, skipClaude, claudeOnly, branch, out } =
+				argv as any;
+			const { runGatherCi } = await import("./gather-ci.js");
+			await runGatherCi({
+				wt,
 				engine,
 				force,
 				skipClaude,
 				claudeOnly,
 				branch,
 				out,
-			} = argv;
-			const { gather } = await import("./gather.js");
-			await gather({
-				worktree: wt,
+			});
+		},
+	)
+	.command(
+		["gather comments", "gather-comments"],
+		"Gather code-review comments since last push and write detailed markdown/JSON",
+		(y) =>
+			y
+				.option("wt", {
+					type: "string",
+					desc: "worktree name (uses its current branch's *remote* counterpart)",
+				})
+				.option("branch", {
+					type: "string",
+					desc: "remote branch name (gather for this branch if no worktree)",
+				})
+				.option("since", {
+					type: "string",
+					default: "auto",
+					desc: "ISO timestamp or 'auto' to use last push commit time",
+				})
+				.option("max", {
+					type: "number",
+					default: 500,
+					desc: "cap total comments across threads (keeps whole threads)",
+				})
+				.option("full-threads", {
+					type: "boolean",
+					default: true,
+					desc: "include parent comments written before --since",
+				})
+				.option("format", {
+					choices: ["md", "json", "both"] as const,
+					default: "both",
+					desc: "output format(s)",
+				})
+				.option("authors", {
+					type: "array",
+					desc: "filter by author(s), case-insensitive",
+				})
+				.option("states", {
+					type: "array",
+					desc: "filter review summaries by states: APPROVED,CHANGES_REQUESTED,COMMENTED",
+				})
+				.option("out", {
+					type: "string",
+					desc: "optional explicit output file path (base name only)",
+				}),
+		async (argv) => {
+			const {
+				wt,
+				branch,
+				since,
+				max,
+				fullThreads,
+				format,
+				out,
+				authors,
+				states,
+			} = argv as any;
+			const { runGatherComments } = await import("./gather-comments.js");
+			await runGatherComments({
+				wt,
+				branch,
+				since,
+				max,
+				fullThreads,
+				format,
+				out,
+				authors,
+				states,
+			});
+		},
+	)
+	.command(
+		"gather",
+		"(deprecated) Alias for: awt gather ci",
+		(y) =>
+			y
+				.option("wt", { type: "string" })
+				.option("engine", {
+					choices: ["claude", "gemini"] as const,
+					default: "claude",
+				})
+				.option("branch", { type: "string" })
+				.option("force", { type: "boolean", default: false })
+				.option("skip-claude", { type: "boolean", default: false })
+				.option("claude-only", { type: "boolean", default: false })
+				.option("out", { type: "string" }),
+		async (argv) => {
+			console.warn("awt gather is deprecated; use `awt gather ci`.");
+			const { wt, engine, force, skipClaude, claudeOnly, branch, out } =
+				argv as any;
+			const { runGatherCi } = await import("./gather-ci.js");
+			await runGatherCi({
+				wt,
 				engine,
 				force,
 				skipClaude,

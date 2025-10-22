@@ -1,3 +1,5 @@
+// This file remains to avoid churn; future milestone can remove or convert remaining helpers to shared modules.
+
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import {

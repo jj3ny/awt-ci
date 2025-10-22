@@ -468,4 +468,252 @@ export class Gh {
 			return [];
 		}
 	}
+
+	/**
+	 * Return branch names on GitHub that contain the given head commit.
+	 */
+	async branchesForCommit(ref: RepoRef, sha: string): Promise<string[] | null> {
+		try {
+			// Octokit endpoint: repos.listBranchesForHeadCommit
+			const { data } = await this.octo.repos.listBranchesForHeadCommit({
+				...ref,
+				commit_sha: sha,
+				per_page: 100,
+			});
+			return data.map((b) => b.name).filter(Boolean);
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Comprehensive comment fetch (REST): issue comments, review line comments, and review summaries.
+	 * Since GitHub APIs vary in `since` support, we filter client-side for review paths.
+	 */
+	async listCommentsRest(
+		ref: RepoRef,
+		pr: number,
+		sinceIso: string,
+		cap = 1000,
+		fullThreads = true,
+	): Promise<{
+		issueComments: {
+			id: number;
+			body: string;
+			created_at: string;
+			updated_at?: string;
+			html_url: string;
+			user: string;
+		}[];
+		reviewComments: {
+			id: number;
+			body: string;
+			created_at: string;
+			updated_at?: string;
+			html_url: string;
+			user: string;
+			path: string;
+			line?: number;
+			start_line?: number;
+			original_line?: number;
+			side?: string | null;
+			commit_id?: string;
+			in_reply_to_id?: number | null;
+			thread_id?: number | null;
+		}[];
+		reviews: {
+			id: number;
+			body: string;
+			state: string;
+			html_url: string;
+			submitted_at?: string;
+			created_at?: string;
+			updated_at?: string;
+			user: string;
+		}[];
+	}> {
+		const perPage = 100;
+
+		// Issue comments (since supported)
+		const issueComments: {
+			id: number;
+			body: string;
+			created_at: string;
+			updated_at?: string;
+			html_url: string;
+			user: string;
+		}[] = [];
+		try {
+			let page = 1;
+			while (true) {
+				const { data } = await this.octo.issues.listComments({
+					...ref,
+					issue_number: pr,
+					per_page: perPage,
+					page,
+					since: sinceIso,
+				});
+				for (const c of data) {
+					issueComments.push({
+						id: c.id,
+						body: c.body || "",
+						created_at: c.created_at || "",
+						updated_at: c.updated_at || undefined,
+						html_url: c.html_url || "",
+						user: c.user?.login || "unknown",
+					});
+				}
+				if (data.length < perPage || issueComments.length >= cap) break;
+				page += 1;
+			}
+		} catch {
+			// ignore
+		}
+
+		// Review comments (no reliable since in all modes; paginate + filter)
+		const reviewComments: {
+			id: number;
+			body: string;
+			created_at: string;
+			updated_at?: string;
+			html_url: string;
+			user: string;
+			path: string;
+			line?: number;
+			start_line?: number;
+			original_line?: number;
+			side?: string | null;
+			commit_id?: string;
+			in_reply_to_id?: number | null;
+			thread_id?: number | null;
+		}[] = [];
+		try {
+			let page = 1;
+			while (true) {
+				const { data } = await this.octo.pulls.listReviewComments({
+					...ref,
+					pull_number: pr,
+					per_page: perPage,
+					page,
+				});
+				for (const c of data) {
+					const created = c.created_at || "";
+					if (!created || created >= sinceIso) {
+						reviewComments.push({
+							id: c.id,
+							body: c.body || "",
+							created_at: created,
+							updated_at: c.updated_at || undefined,
+							html_url: c.html_url || "",
+							user: c.user?.login || "unknown",
+							path: c.path || "",
+							line: (c as any).line,
+							start_line: (c as any).start_line,
+							original_line: (c as any).original_line,
+							side: (c as any).side || null,
+							commit_id: (c as any).commit_id,
+							in_reply_to_id: (c as any).in_reply_to_id ?? null,
+							thread_id: (c as any).pull_request_review_id ?? null,
+						});
+					}
+				}
+				if (data.length < perPage || reviewComments.length >= cap) break;
+				page += 1;
+			}
+			// If fullThreads: backfill parents for replies (best-effort, bounded)
+			if (fullThreads) {
+				const parentsToFetch = Array.from(
+					new Set(
+						reviewComments
+							.map((c) => c.in_reply_to_id)
+							.filter((v): v is number => !!v),
+					),
+				);
+				for (const pid of parentsToFetch.slice(0, 200)) {
+					try {
+						const { data: pc } = await this.octo.pulls.getReviewComment({
+							...ref,
+							comment_id: pid,
+						});
+						if (!reviewComments.some((c) => c.id === pc.id)) {
+							reviewComments.push({
+								id: pc.id,
+								body: pc.body || "",
+								created_at: pc.created_at || "",
+								updated_at: pc.updated_at || undefined,
+								html_url: pc.html_url || "",
+								user: pc.user?.login || "unknown",
+								path: pc.path || "",
+								line: (pc as any).line,
+								start_line: (pc as any).start_line,
+								original_line: (pc as any).original_line,
+								side: (pc as any).side || null,
+								commit_id: (pc as any).commit_id,
+								in_reply_to_id: (pc as any).in_reply_to_id ?? null,
+								thread_id: (pc as any).pull_request_review_id ?? null,
+							});
+						}
+					} catch {
+						// ignore
+					}
+				}
+			}
+		} catch {
+			// ignore
+		}
+
+		// Review summaries (filter client-side)
+		const reviews: {
+			id: number;
+			body: string;
+			state: string;
+			html_url: string;
+			submitted_at?: string;
+			created_at?: string;
+			updated_at?: string;
+			user: string;
+		}[] = [];
+		try {
+			let page = 1;
+			while (true) {
+				const { data } = await this.octo.pulls.listReviews({
+					...ref,
+					pull_number: pr,
+					per_page: perPage,
+					page,
+				});
+				for (const r of data) {
+					const submitted =
+						(r.submitted_at as string | undefined) ||
+						((r as any).created_at as string | undefined) ||
+						((r as any).updated_at as string | undefined) ||
+						"";
+					if (!submitted || submitted >= sinceIso) {
+						reviews.push({
+							id: r.id,
+							body: r.body || "",
+							state: r.state || "COMMENTED",
+							html_url:
+								typeof (r as any).html_url === "string" &&
+								(r as any).html_url.length
+									? ((r as any).html_url as string)
+									: typeof (r as any)._links?.html?.href === "string"
+										? ((r as any)._links.html.href as string)
+										: "",
+							submitted_at: r.submitted_at || undefined,
+							created_at: (r as any).created_at || undefined,
+							updated_at: (r as any).updated_at || undefined,
+							user: r.user?.login || "unknown",
+						});
+					}
+				}
+				if (data.length < perPage || reviews.length >= cap) break;
+				page += 1;
+			}
+		} catch {
+			// ignore
+		}
+
+		return { issueComments, reviewComments, reviews };
+	}
 }

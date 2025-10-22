@@ -185,3 +185,32 @@ export function homePathDisplay(p: string): string {
 	const home = process.env.HOME || process.env.USERPROFILE || "";
 	return home && p.startsWith(home) ? p.replace(home, "~") : p;
 }
+
+export function stableStringify(v: unknown): string {
+	try {
+		return JSON.stringify(v, Object.keys(v as any).sort());
+	} catch {
+		return JSON.stringify(v);
+	}
+}
+
+export function computeDigest(v: unknown): string {
+	return hashString(stableStringify(v));
+}
+
+export async function withRateLimitRetry<T>(
+	fn: () => Promise<T>,
+	retries = 2,
+): Promise<T> {
+	try {
+		return await fn();
+	} catch (e: any) {
+		if (retries <= 0) throw e;
+		const msg = String(e?.message || "");
+		if (msg.toLowerCase().includes("rate") || e?.status === 403) {
+			await new Promise((r) => setTimeout(r, 2000));
+			return withRateLimitRetry(fn, retries - 1);
+		}
+		throw e;
+	}
+}

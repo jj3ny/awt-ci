@@ -27,6 +27,14 @@ const {
 	windowNameForWt,
 } = muxModule;
 
+// Currently, watch.ts uses originOwnerRepo/currentBranch/remoteHeadSha. We'll replace with resolveTarget() in M3,
+// ensuring identical behavior by default and better handling of detached HEAD and remote-less branches.
+
+// New config keys will be read from .awt/config.jsonc (commentsQuietSec, commentsPollSec, consolidatedPastePolicy, commentsCap).
+// State fields last_comment_seen_at_for_sha and last_consolidated_digest_for_sha will be updated accordingly.
+
+// Existing watcher implementation remains unchanged in this milestone.
+
 export async function watch(opts: {
 	worktree: string;
 	engine: Engine;

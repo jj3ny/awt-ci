@@ -35,21 +35,34 @@ If you prefer env tokens, set `GITHUB_TOKEN` or `GH_TOKEN`. Otherwise awt-ci wil
 From inside a repo:
 
 ```bash
-awt watch <worktree-name> --engine claude
+awt-ci watch <worktree-name> --engine claude
 ```
 
 Configure per repo in `.awt/config.jsonc` and edit your prompt in `.awt/prompts/debug.md`.
 
-Manual one-shot gather to clipboard or stdout:
+### One‑shot gatherers
 
+**CI failures** since last push (markdown report with XML markers; optional Claude/Gemini summary):
+
+```bash
+awt-ci gather ci --wt <worktree-name> [--force] [--skip-claude] [--claude-only] [--out path]
+# or target a remote branch without a local worktree:
+awt-ci gather ci --branch <remote-branch> [--force]
 ```
-awt gather <worktree-name> --copy      # copy to clipboard (pbcopy/OSC52/wl-copy/xclip)
-awt gather <worktree-name>             # print to stdout
+
+**Code‑review comments** since last push (full threads; writes markdown + JSON):
+
+```bash
+awt-ci gather comments --wt <worktree-name> [--since auto|<ISO>]
+# optional filters/caps:
+awt-ci gather comments --wt <worktree-name> --max 500 --authors alice bob --states APPROVED COMMENTED --format both
 ```
+
+**Deprecation:** `awt gather` is now an alias of `awt-ci gather ci`. Use the new subcommands for clarity.
 
 ## Notes
 
-- Requires `tmux`. GitHub auth is taken from your local `gh` login by default.
+- Requires `tmux` or `zellij`. GitHub auth is taken from your local `gh` login by default.
 - Summarization uses Claude Code SDK (subscription billing). If Claude is unavailable, a heuristic fallback is used.
 - Uses tmux buffer paste with sentinel verification for reliability.
 
