@@ -15,9 +15,8 @@ import { getGhToken, readJsonc, safeRead, sleep } from "./util.js";
 
 // Dynamic import for multiplexer support
 const MUX = process.env.AWT_MULTIPLEXER || "zellij";
-const muxModule = MUX === "zellij"
-	? await import("./zellij.js")
-	: await import("./tmux.js");
+const muxModule =
+	MUX === "zellij" ? await import("./zellij.js") : await import("./tmux.js");
 
 const {
 	notifyAll,
@@ -179,10 +178,10 @@ export async function watch(opts: {
 				}
 			} catch {}
 
-            // Determine branch & remote sha
-            const branch = await currentBranch(wtPath).catch(async () =>
-                currentBranch(root),
-            );
+			// Determine branch & remote sha
+			const branch = await currentBranch(wtPath).catch(async () =>
+				currentBranch(root),
+			);
 			let remoteSha: string | null = null;
 			if (branch && branch !== "detached") {
 				remoteSha = await remoteHeadSha(wtPath, branch).catch(async () =>
@@ -191,22 +190,22 @@ export async function watch(opts: {
 			}
 
 			// Detect push (via remote HEAD change vs state)
-            if (remoteSha && remoteSha !== state.last_push?.sha) {
-                state.last_push = {
-                    sha: remoteSha,
-                    pushed_at: new Date().toISOString(),
-                };
-                if (branch && branch !== "detached") {
-                    state.last_push_by_branch = state.last_push_by_branch || {};
-                    state.last_push_by_branch[branch] = {
-                        sha: remoteSha,
-                        pushed_at: new Date().toISOString(),
-                    };
-                }
-                await writeState(root, state);
-                postPush = true;
-                notifiedNoPrForSha = null;
-            }
+			if (remoteSha && remoteSha !== state.last_push?.sha) {
+				state.last_push = {
+					sha: remoteSha,
+					pushed_at: new Date().toISOString(),
+				};
+				if (branch && branch !== "detached") {
+					state.last_push_by_branch = state.last_push_by_branch || {};
+					state.last_push_by_branch[branch] = {
+						sha: remoteSha,
+						pushed_at: new Date().toISOString(),
+					};
+				}
+				await writeState(root, state);
+				postPush = true;
+				notifiedNoPrForSha = null;
+			}
 
 			// Resolve PR: prefer by SHA, then by branch
 			let prNumber: number | null = null;

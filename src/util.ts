@@ -139,14 +139,17 @@ export async function ensureDir(dir: string): Promise<void> {
 
 export async function pathExists(p: string): Promise<boolean> {
 	try {
-	await fs.access(p);
-	return true;
+		await fs.access(p);
+		return true;
 	} catch {
-	return false;
+		return false;
 	}
 }
 
-export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+export async function writeFileAtomic(
+	filePath: string,
+	content: string,
+): Promise<void> {
 	const tmp = `${filePath}.${randomUUID()}.tmp`;
 	await fs.writeFile(tmp, content, "utf8");
 	await fs.rename(tmp, filePath);

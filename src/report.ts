@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import {
     BuildReportInput,
     BuildReportOutput,
@@ -184,12 +183,13 @@ export function buildMarkdownXmlReport(input: BuildReportInput): BuildReportOutp
     // Header
     lines.push(`# CI Gather Report`);
     lines.push(
-        `Repo: **${owner}/${repo}**  |  Branch: **${branch}**  |  SHA: **${sha.slice(0, 7)}**  |  Since (last push): **${sinceIso}**`,
+        `Repo: **${owner}/${repo}**  |  Branch: **${branch}**  |  SHA: **${sha.slice(0,7)}**  |  Since (last push): **${sinceIso}**`,
     );
     if (flags.force) lines.push(`> Note: Generated with \`--force\`.`);
     lines.push("");
 
     // (A) PR Comments
+    let commentsSectionChars = 0;
     {
         const preLen = lines.join("\n").length;
         sectionStart("## PR Comments (since last push)", `<pr-comments since="${sinceIso}">`);
@@ -205,7 +205,7 @@ export function buildMarkdownXmlReport(input: BuildReportInput): BuildReportOutp
             lines.push(`No open PR for branch **${branch}**.`);
         }
         sectionEnd("</pr-comments>");
-        var commentsSectionChars = lines.join("\n").length - preLen;
+        commentsSectionChars = lines.join("\n").length - preLen;
     }
 
     // (B) Failing CI Excerpts
@@ -283,11 +283,14 @@ export function buildMarkdownXmlReport(input: BuildReportInput): BuildReportOutp
     return out;
 }
 
-function escapeXmlAttr(s: string): string {
-    // Properly escape XML attribute characters.
-    return s
-        .replace(/&/g, "&")
-        .replace(/"/g, """)
-        .replace(/</g, "<")
-        .replace(/>/g, ">");
+export function escapeXmlAttr(s: string): string {
+    // Properly escape XML attribute characters for attribute values.
+    const replacements: Record<string, string> = {
+        "&": "&amp;",
+        '"': "&quot;",
+        "'": "&apos;",
+        "<": "&lt;",
+        ">": "&gt;",
+    };
+    return s.replace(/[&"'<>]/g, (char) => replacements[char as keyof typeof replacements]!);
 }

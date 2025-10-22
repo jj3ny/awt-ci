@@ -1,50 +1,50 @@
 {
-  // AWT CI Configuration Example
-  // Copy to .awt/config.jsonc and customize for your project
-  
-  // LLM engine for summarizing CI failures
-  "engine": "claude", // or "gemini"
-  
-  // GitHub repository (auto-detected if not specified)
-  "owner": "",
-  "repo": "",
-  
-  // Polling intervals
-  "pollSecIdle": 60,        // seconds between checks when idle
-  "pollSecPostPush": 20,    // seconds between checks after push
-  "idleSec": 300,           // seconds of inactivity before "dormant" warning
-  
-  // CI failure summarization limits
-  "summarizePerJobKB": 512,  // max KB of logs per job
-  "summarizeTotalMB": 5,     // max MB total across all jobs
-  
-  // Conflict resolution hints
-  "conflictHints": "simple", // or "simple+recent-base" for more context
-  
-  // Custom prompt path (relative to repo root)
-  "promptPath": ".awt/prompts/debug.md",
-  
-  // Worktree setup commands - run automatically when creating new worktrees
-  // These commands are executed in order in the new worktree directory
-  // Use this to override automatic detection or add custom setup steps
-  "worktreeSetupCommands": [
-    // Examples:
-    // "make install",
-    // "pnpm install && pnpm build",
-    // "uv sync",
-    // "pre-commit install --install-hooks",
-    // "cp ../.env.example .env",
-    // "./scripts/setup-dev.sh"
-  ]
-  
-  // Auto-detected setup (when worktreeSetupCommands is not specified):
-  // 1. Makefile with 'install' target → make install
-  // 2. package.json → pnpm/yarn/npm install (based on lockfile)
-  // 3. pyproject.toml → uv sync (or pip install if no uv)
-  // 4. requirements.txt → python3 -m venv && pip install
-  // 5. Gemfile → bundle install
-  // 6. go.mod → go mod download
-  // 7. Cargo.toml → cargo fetch
-  // 8. .pre-commit-config.yaml → pre-commit install --install-hooks
-  // 9. Git hooks from main repo → copied to worktree
+	// AWT CI Configuration Example
+	// Copy to .awt/config.jsonc and customize for your project
+
+	// LLM engine for summarizing CI failures
+	"engine": "claude", // or "gemini"
+
+	// GitHub repository (auto-detected if not specified)
+	"owner": "",
+	"repo": "",
+
+	// Polling intervals
+	"pollSecIdle": 60, // seconds between checks when idle
+	"pollSecPostPush": 20, // seconds between checks after push
+	"idleSec": 300, // seconds of inactivity before "dormant" warning
+
+	// CI failure summarization limits
+	"summarizePerJobKB": 512, // max KB of logs per job
+	"summarizeTotalMB": 5, // max MB total across all jobs
+
+	// Conflict resolution hints
+	"conflictHints": "simple", // or "simple+recent-base" for more context
+
+	// Custom prompt path (relative to repo root)
+	"promptPath": ".awt/prompts/debug.md",
+
+	// Worktree setup commands - run automatically when creating new worktrees
+	// These commands are executed in order in the new worktree directory
+	// Use this to override automatic detection or add custom setup steps
+	"worktreeSetupCommands": [
+		// Examples:
+		// "make install",
+		// "pnpm install && pnpm build",
+		// "uv sync",
+		// "pre-commit install --install-hooks",
+		// "cp ../.env.example .env",
+		// "./scripts/setup-dev.sh"
+	]
+
+	// Auto-detected setup (when worktreeSetupCommands is not specified):
+	// 1. Makefile with 'install' target → make install
+	// 2. package.json → pnpm/yarn/npm install (based on lockfile)
+	// 3. pyproject.toml → uv sync (or pip install if no uv)
+	// 4. requirements.txt → python3 -m venv && pip install
+	// 5. Gemfile → bundle install
+	// 6. go.mod → go mod download
+	// 7. Cargo.toml → cargo fetch
+	// 8. .pre-commit-config.yaml → pre-commit install --install-hooks
+	// 9. Git hooks from main repo → copied to worktree
 }

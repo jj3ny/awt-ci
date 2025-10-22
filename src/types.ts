@@ -6,11 +6,11 @@ export interface RepoRef {
 }
 
 export interface AwtState {
-    last_push?: { sha: string; pushed_at: string };
-    // Optional per-branch last push tracking
-    last_push_by_branch?: Record<string, { sha: string; pushed_at: string }>;
-    last_ci_seen_for_sha?: string;
-    last_ci_conclusion?: string;
+	last_push?: { sha: string; pushed_at: string };
+	// Optional per-branch last push tracking
+	last_push_by_branch?: Record<string, { sha: string; pushed_at: string }>;
+	last_ci_seen_for_sha?: string;
+	last_ci_conclusion?: string;
 }
 
 export interface WatchConfig {
@@ -91,7 +91,12 @@ export interface BuildReportInput {
 	sha: string;
 	sinceIso: string;
 	prNumber: number | null;
-	commentsSince: { author: string; createdAt: string; body: string; url: string }[];
+	commentsSince: {
+		author: string;
+		createdAt: string;
+		body: string;
+		url: string;
+	}[];
 	runExtracts: RunExtract[];
 	ghAstGrepForRun: (runId: number) => string;
 	claudeSummary?: string;

@@ -1,5 +1,5 @@
-import * as path from "node:path";
 import { promises as fs } from "node:fs";
+import * as path from "node:path";
 import { gatherFailures } from "./ci.js";
 import {
 	currentBranch,
@@ -10,41 +10,67 @@ import {
 	repoRootForWorktree,
 } from "./git.js";
 import { Gh } from "./github.js";
+import {
+	buildMarkdownXmlReport,
+	buildReportFilename,
+	toRunExtract,
+} from "./report.js";
 import { readState } from "./state.js";
-import { buildAgentPayload, summarizeFailures, summarizeErrorExcerptText } from "./summarize.js";
-import type { Engine, WatchConfig, RunBrief, JobBrief, RunExtract, GatherFlags } from "./types.js";
-import { getGhToken, readJsonc, safeRead, pathExists, ensureDir, writeFileAtomic, nowStampUTC, shortenSha, color, homePathDisplay } from "./util.js";
-import { buildReportFilename, buildMarkdownXmlReport, toRunExtract } from "./report.js";
+import {
+	buildAgentPayload,
+	summarizeErrorExcerptText,
+	summarizeFailures,
+} from "./summarize.js";
+import type {
+	Engine,
+	GatherFlags,
+	JobBrief,
+	RunBrief,
+	RunExtract,
+	WatchConfig,
+} from "./types.js";
+import {
+	color,
+	ensureDir,
+	getGhToken,
+	homePathDisplay,
+	nowStampUTC,
+	pathExists,
+	readJsonc,
+	safeRead,
+	shortenSha,
+	writeFileAtomic,
+} from "./util.js";
 
 export async function gather(opts: {
-    worktree: string;
-    engine: Engine;
+	worktree: string;
+	engine: Engine;
 	force: boolean;
 	skipClaude: boolean;
 	claudeOnly: boolean;
-    branch?: string;
+	branch?: string;
 	out?: string;
 }) {
 	const wt = opts.worktree;
 	const root = await repoRoot();
 	const repoBase = path.basename(root);
-    const wtPath = repoRootForWorktree(repoBase, wt);
-    const branchMode = !!opts.branch;
+	const wtPath = repoRootForWorktree(repoBase, wt);
+	const branchMode = !!opts.branch;
 
-    let wtExists = true;
-    try {
+	let wtExists = true;
+	try {
 		await fs.access(wtPath);
-    } catch {
+	} catch {
 		wtExists = false;
-    }
-    if (!wtExists && !branchMode) {
+	}
+	if (!wtExists && !branchMode) {
 		process.stderr.write(
 			`Worktree '${wt}' not found at ${wtPath}. Create it or use --branch to target a remote branch.\n`,
 		);
 		process.exitCode = 1;
 		return;
-    }
-    const ctxPath = wtExists ? wtPath : root;
+	}
+	const ctxPath = wtExists ? wtPath : root;
 
 	// Load config.jsonc if present
 	const cfgPath = path.join(root, ".awt", "config.jsonc");
@@ -74,23 +100,23 @@ export async function gather(opts: {
 		: "detached";
 	const targetBranch: string | null =
 		opts.branch || (localBranch !== "detached" ? localBranch : null);
-    if (!targetBranch) {
+	if (!targetBranch) {
 		process.stderr.write(
 			`Cannot determine current branch for worktree '${wt}'. Specify --branch <remote-branch>.\n`,
 		);
 		process.exitCode = 1;
 		return;
-    }
+	}
 
 	// Resolve remote HEAD sha
 	let sha: string | null =
 		(await remoteHeadSha(ctxPath, targetBranch).catch(async () =>
 			remoteHeadSha(root, targetBranch),
 		)) || null;
-    if (!sha) {
+	if (!sha) {
 		// GitHub API fallback confirms remote existence
 		sha = await gh.getBranchSha({ owner, repo }, targetBranch);
-    }
+	}
 	if (!sha) {
 		process.stderr.write(
 			`No remote branch found for '${targetBranch}' on origin. Ensure it exists and fetch: git fetch origin ${targetBranch}\n`,
@@ -101,14 +127,20 @@ export async function gather(opts: {
 
 	// Last push time = commit date of remote HEAD
 	let sinceIso: string | null = await gh.getCommitDate({ owner, repo }, sha);
-	if (!sinceIso) sinceIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+	if (!sinceIso)
+		sinceIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 
 	// PR number and comments since last push
-	let prNumber: number | null = await gh
+	const prNumber: number | null = await gh
 		.findOpenPrForBranch({ owner, repo }, owner, targetBranch)
 		.catch(() => null);
 
-	let commentsSince: { author: string; createdAt: string; body: string; url: string }[] = [];
+	let commentsSince: {
+		author: string;
+		createdAt: string;
+		body: string;
+		url: string;
+	}[] = [];
 	let totalRecentComments = 0;
 	if (prNumber) {
 		try {
@@ -118,7 +150,11 @@ export async function gather(opts: {
 				sinceIso!,
 				cfg.maxRecentComments ?? 30,
 			);
-			const recentAll = await gh.listCommentsRecent({ owner, repo }, prNumber, 100);
+			const recentAll = await gh.listCommentsRecent(
+				{ owner, repo },
+				prNumber,
+				100,
+			);
 			totalRecentComments = recentAll.length;
 		} catch {
 			commentsSince = [];
@@ -126,11 +162,16 @@ export async function gather(opts: {
 	}
 
 	// Workflow runs since last push
-	const runsSince = await gh.listWorkflowRunsSince({ owner, repo }, targetBranch, sinceIso!);
+	const runsSince = await gh.listWorkflowRunsSince(
+		{ owner, repo },
+		targetBranch,
+		sinceIso!,
+	);
 	const failureLike = new Set(["failure", "timed_out", "cancelled"]);
 	const inProgress = runsSince.filter((r) => r.status !== "completed");
 	const completedFailing = runsSince.filter(
-		(r) => r.status === "completed" && r.conclusion && failureLike.has(r.conclusion),
+		(r) =>
+			r.status === "completed" && r.conclusion && failureLike.has(r.conclusion),
 	);
 
 	if (inProgress.length && !opts.force) {
@@ -196,7 +237,7 @@ export async function gather(opts: {
 		if (ex) {
 			runExtracts.push(ex);
 			includedRunIds.push(r.id);
-        }
+		}
 	}
 	if (opts.force) {
 		for (const r of inProgress) {
@@ -211,7 +252,12 @@ export async function gather(opts: {
 	// Curated excerpt for model summarization
 	const curatedExcerpt = runExtracts
 		.flatMap((rx) =>
-			rx.jobs.map((jx) => [`===== RUN ${rx.run.id} — ${rx.run.name ?? "Workflow"} — JOB ${jx.job.name} =====`, jx.excerpt].join("\n")),
+			rx.jobs.map((jx) =>
+				[
+					`===== RUN ${rx.run.id} — ${rx.run.name ?? "Workflow"} — JOB ${jx.job.name} =====`,
+					jx.excerpt,
+				].join("\n"),
+			),
 		)
 		.join("\n\n");
 
@@ -256,7 +302,9 @@ export async function gather(opts: {
 	});
 
 	// Decide output path
-	let outDir = wtExists ? path.join(wtPath, "docs", "tmp") : path.resolve(process.cwd());
+	let outDir = wtExists
+		? path.join(wtPath, "docs", "tmp")
+		: path.resolve(process.cwd());
 	if (!(await pathExists(outDir))) {
 		// Fallback to worktree root (or cwd)
 		outDir = wtExists ? wtPath : path.resolve(process.cwd());
@@ -291,7 +339,10 @@ export async function gather(opts: {
 			`  comments:    total recent=${totalRecentComments}, since last push=${commentsSince.length}`,
 			...commentsSince
 				.slice(0, 8)
-				.map((cmt) => `    - @${cmt.author}: ${(cmt.body || "").split(/\r?\n/)[0]?.slice(0, 80) || ""}`),
+				.map(
+					(cmt) =>
+						`    - @${cmt.author}: ${(cmt.body || "").split(/\r?\n/)[0]?.slice(0, 80) || ""}`,
+				),
 			`  runs:        ${runExtracts.length} included (${includedRunIds.map((id) => `#${id}`).join(", ") || "-"})`,
 			`  captured:    ${c("red", `ERROR:${totalErr}`)}  ${c("red", `FAILED:${totalFail}`)}  ${c(
 				"magenta",

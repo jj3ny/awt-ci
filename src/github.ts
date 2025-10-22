@@ -14,25 +14,26 @@ export class Gh {
 	): Promise<number | null> {
 		try {
 			const head = `${headOwner}:${branch}`;
-			const res = await this.octo.pulls.list({
+			const { data } = await this.octo.pulls.list({
 				...ref,
 				head,
 				state: "open",
 				per_page: 10,
 			});
-			if (res.data.length) return res.data[0].number;
+			const [firstPr] = data;
+			if (firstPr) return firstPr.number;
 		} catch {}
 		// Fallback: scan open PRs and match by head.ref
 		try {
-			const res2 = await this.octo.pulls.list({
+			const { data } = await this.octo.pulls.list({
 				...ref,
 				state: "open",
 				per_page: 100,
-				sort: "updated" as any,
-				direction: "desc" as any,
+				sort: "updated",
+				direction: "desc",
 			});
-			const pr = res2.data.find((p: any) => (p.head?.ref || "") === branch);
-			return pr ? pr.number : null;
+			const match = data.find((pull) => (pull.head?.ref || "") === branch);
+			return match ? match.number : null;
 		} catch {
 			return null;
 		}
@@ -41,16 +42,16 @@ export class Gh {
 	async latestOpenPr(
 		ref: RepoRef,
 	): Promise<{ number: number; headRefName: string } | null> {
-		const res = await this.octo.pulls.list({
+		const { data } = await this.octo.pulls.list({
 			...ref,
 			state: "open",
 			per_page: 1,
-			sort: "updated" as any,
-			direction: "desc" as any,
+			sort: "updated",
+			direction: "desc",
 		});
-		const pr = res.data[0];
+		const [pr] = data;
 		if (!pr) return null;
-		return { number: pr.number, headRefName: (pr as any).head?.ref || "" };
+		return { number: pr.number, headRefName: pr.head?.ref ?? "" };
 	}
 
 	async getPrLite(
@@ -127,11 +128,17 @@ export class Gh {
 			for (const r of rv.data) {
 				const submitted = r.submitted_at || "";
 				if (submitted && submitted > sinceIso) {
+					const htmlUrl =
+						typeof r.html_url === "string" && r.html_url.length
+							? r.html_url
+							: typeof r._links?.html?.href === "string"
+								? r._links.html.href
+								: "";
 					items.push({
 						author: r.user?.login || "unknown",
 						createdAt: submitted,
 						body: `[${r.state}]${r.body ? ` ${r.body}` : ""}`,
-						url: (r as any).html_url || (r._links as any)?.html?.href || "",
+						url: htmlUrl,
 					});
 				}
 			}
@@ -198,7 +205,12 @@ export class Gh {
 					author: r.user?.login || "unknown",
 					createdAt: submitted,
 					body: `[${r.state}]${r.body ? ` ${r.body}` : ""}`,
-					url: (r as any).html_url || (r._links as any)?.html?.href || "",
+					url:
+						typeof r.html_url === "string" && r.html_url.length
+							? r.html_url
+							: typeof r._links?.html?.href === "string"
+								? r._links.html.href
+								: "",
 				});
 			}
 		} catch {}
@@ -224,14 +236,12 @@ export class Gh {
 			per_page: 20,
 			head_sha: sha,
 		});
-		const runs = runsRes.data.workflow_runs.map((r) => ({
-			id: r.id,
-			url: r.html_url || "",
-			status: r.status || "queued",
-			conclusion: r.conclusion,
-			createdAt:
-				(r as any).run_started_at || r.created_at || r.updated_at || null,
-			name: (r as any).name || null,
+		const runs = runsRes.data.workflow_runs.map((run) => ({
+			id: run.id,
+			url: run.html_url ?? "",
+			status: run.status ?? "queued",
+			conclusion: run.conclusion ?? null,
+			createdAt: run.run_started_at ?? run.created_at ?? run.updated_at ?? null,
 		}));
 		const failureLike = new Set(["failure", "timed_out", "cancelled"]);
 		const allCompleted =
@@ -261,7 +271,7 @@ export class Gh {
 				branch,
 			});
 			const run = runsRes.data.workflow_runs[0];
-			return (run as any)?.head_sha || null;
+			return run?.head_sha ?? null;
 		} catch {
 			return null;
 		}
@@ -283,11 +293,11 @@ export class Gh {
 				per_page: Math.min(Math.max(perPage, 1), 100),
 			});
 			const failureLike = new Set(["failure", "timed_out", "cancelled"]);
-			for (const r of runsRes.data.workflow_runs) {
-				const status = (r.status || "").toString();
-				const concl = (r.conclusion || "").toString();
+			for (const run of runsRes.data.workflow_runs) {
+				const status = (run.status || "").toString();
+				const concl = (run.conclusion || "").toString();
 				if (status === "completed" && failureLike.has(concl)) {
-					return (r as any)?.head_sha || null;
+					return run.head_sha ?? null;
 				}
 			}
 			return null;
@@ -300,19 +310,25 @@ export class Gh {
 		ref: RepoRef,
 		runId: number,
 	): Promise<
-		{ id: number; name: string; html_url: string; conclusion: string | null; status: string | null }[]
+		{
+			id: number;
+			name: string;
+			html_url: string;
+			conclusion: string | null;
+			status: string | null;
+		}[]
 	> {
 		const { data } = await this.octo.actions.listJobsForWorkflowRun({
 			...ref,
 			run_id: runId,
 			per_page: 100,
 		});
-		return data.jobs.map((j) => ({
-			id: j.id,
-			name: j.name,
-			html_url: j.html_url || "",
-			conclusion: j.conclusion || null,
-			status: j.status || null,
+		return data.jobs.map((job) => ({
+			id: job.id,
+			name: job.name,
+			html_url: job.html_url ?? "",
+			conclusion: job.conclusion ?? null,
+			status: job.status ?? null,
 		}));
 	}
 
@@ -322,14 +338,14 @@ export class Gh {
 				...ref,
 				branch,
 			});
-			return (data as any)?.commit?.sha || null;
+			return data.commit?.sha ?? null;
 		} catch {
 			try {
 				const { data } = await this.octo.git.getRef({
 					...ref,
 					ref: `heads/${branch}`,
 				});
-				return (data as any)?.object?.sha || null;
+				return data.object?.sha ?? null;
 			} catch {
 				return null;
 			}
@@ -338,7 +354,7 @@ export class Gh {
 
 	async fetchJobLog(ref: RepoRef, jobId: number): Promise<string> {
 		// GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs returns raw text (may be gzip-encoded)
-		const res: any = await this.octo.request(
+		const res = await this.octo.request(
 			"GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
 			{ ...ref, job_id: jobId },
 		);
@@ -349,7 +365,20 @@ export class Gh {
 		)
 			.toString()
 			.toLowerCase();
-		const buf = Buffer.isBuffer(res.data) ? res.data : Buffer.from(res.data);
+		const rawData = res.data;
+		let buf: Buffer;
+		if (Buffer.isBuffer(rawData)) {
+			buf = rawData;
+		} else if (typeof rawData === "string") {
+			buf = Buffer.from(rawData, "utf8");
+		} else if (rawData instanceof ArrayBuffer) {
+			buf = Buffer.from(rawData);
+		} else if (ArrayBuffer.isView(rawData)) {
+			const view = rawData as ArrayBufferView;
+			buf = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+		} else {
+			buf = Buffer.from(String(rawData ?? ""), "utf8");
+		}
 		if (enc.includes("gzip")) {
 			const zlib = await import("node:zlib");
 			return zlib.gunzipSync(buf).toString("utf8");
@@ -406,15 +435,17 @@ export class Gh {
 		branch: string,
 		sinceIso: string,
 		perPage = 100,
-	): Promise<{
-		id: number;
-		url: string;
-		status: string;
-		conclusion: string | null;
-		createdAt: string | null;
-		name: string | null;
-		headSha: string | null;
-	}[]> {
+	): Promise<
+		{
+			id: number;
+			url: string;
+			status: string;
+			conclusion: string | null;
+			createdAt: string | null;
+			name: string | null;
+			headSha: string | null;
+		}[]
+	> {
 		try {
 			const res = await this.octo.actions.listWorkflowRunsForRepo({
 				...ref,
@@ -423,14 +454,15 @@ export class Gh {
 				// GitHub supports 'created' filter with qualifiers like '>=YYYY-MM-DD'
 				created: `>=${sinceIso}`,
 			});
-			return res.data.workflow_runs.map((r: any) => ({
-				id: r.id as number,
-				url: r.html_url || "",
-				status: r.status || "queued",
-				conclusion: r.conclusion || null,
-				createdAt: r.run_started_at || r.created_at || r.updated_at || null,
-				name: r.name || null,
-				headSha: r.head_sha || null,
+			return res.data.workflow_runs.map((run) => ({
+				id: run.id,
+				url: run.html_url ?? "",
+				status: run.status ?? "queued",
+				conclusion: run.conclusion ?? null,
+				createdAt:
+					run.run_started_at ?? run.created_at ?? run.updated_at ?? null,
+				name: run.name ?? null,
+				headSha: run.head_sha ?? null,
 			}));
 		} catch {
 			return [];

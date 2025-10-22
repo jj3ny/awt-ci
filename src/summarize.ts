@@ -48,16 +48,26 @@ export async function summarizeFailures(
 export async function summarizeErrorExcerptText(
 	excerpt: string,
 	engine: Engine,
-	opts: { cwd: string; repo: RepoRef; prNumber?: number | null; sha: string; runIds?: number[] },
+	opts: {
+		cwd: string;
+		repo: RepoRef;
+		prNumber?: number | null;
+		sha: string;
+		runIds?: number[];
+	},
 ): Promise<string> {
 	const header: string[] = [];
 	header.push(
 		`You are assisting as a senior engineer triaging CI failures for ${opts.repo.owner}/${opts.repo.repo}.`,
 	);
 	if (opts.prNumber && opts.prNumber > 0) {
-		header.push(`Produce a concise, actionable report for PR #${opts.prNumber} (SHA ${opts.sha.slice(0, 7)}).`);
+		header.push(
+			`Produce a concise, actionable report for PR #${opts.prNumber} (SHA ${opts.sha.slice(0, 7)}).`,
+		);
 	} else {
-		header.push(`Produce a concise, actionable report for branch SHA ${opts.sha.slice(0, 7)}.`);
+		header.push(
+			`Produce a concise, actionable report for branch SHA ${opts.sha.slice(0, 7)}.`,
+		);
 	}
 	header.push(
 		`Input contains only failure lines (ERROR/FAILED/XFAIL) and possibly the pytest "short test summary info" block extracted from CI logs since the last push.`,
@@ -69,7 +79,9 @@ export async function summarizeErrorExcerptText(
 		`Prefer precise, copy-pasteable commands. If unsure, include useful 'gh run view <id> --log | rg -n -i " (ERROR|FAILED|XFAIL) "' commands. Suggest ast-grep queries to pinpoint code patterns.`,
 	);
 	if (opts.runIds?.length) {
-		header.push(`Relevant CI runs:\n${opts.runIds.map((id) => `- gh run view ${id} --log | less`).join("\n")}`);
+		header.push(
+			`Relevant CI runs:\n${opts.runIds.map((id) => `- gh run view ${id} --log | less`).join("\n")}`,
+		);
 	}
 
 	const prompt = `${header.join("\n")}\n\n===== FAILURE EXCERPT START =====\n${excerpt}\n===== FAILURE EXCERPT END =====\n`;
@@ -85,7 +97,12 @@ export async function summarizeErrorExcerptText(
 		const fallbackModel = process.env.AWT_CLAUDE_FALLBACK || "claude-opus-4-1";
 		const summary = await runClaudeQuery(query, prompt, opts.cwd, primaryModel);
 		if (summary) return summary;
-		const summary2 = await runClaudeQuery(query, prompt, opts.cwd, fallbackModel);
+		const summary2 = await runClaudeQuery(
+			query,
+			prompt,
+			opts.cwd,
+			fallbackModel,
+		);
 		if (summary2) return summary2;
 	} catch {}
 
@@ -295,8 +312,8 @@ export async function buildAgentPayload(args: {
 	comments: { author: string; createdAt: string; body: string; url: string }[];
 	debugPrompt: string;
 	runs: { url: string; conclusion: string | null }[];
-		summaryEngine?: string;
-		logs?: { jobId: number; runId: number; jobName: string; text: string }[];
+	summaryEngine?: string;
+	logs?: { jobId: number; runId: number; jobName: string; text: string }[];
 	conflictFiles?: string[];
 	pushedAtIso?: string;
 }): Promise<{ sentinel: string; text: string }> {
@@ -331,17 +348,17 @@ export async function buildAgentPayload(args: {
 			lines.push(`- @${c.author} (${c.createdAt}): ${c.body} — ${c.url}`);
 	}
 	if (args.logs && args.logs.length) {
-			lines.push("\n## Raw Logs (truncated)");
-			lines.push("<ci-logs>");
-			for (const l of args.logs) {
-				lines.push(`\n--- Job ${l.jobName} (run ${l.runId}, job ${l.jobId}) ---`);
-				lines.push("<pre>");
-				lines.push(l.text);
-				lines.push("</pre>");
-			}
-			lines.push("</ci-logs>");
+		lines.push("\n## Raw Logs (truncated)");
+		lines.push("<ci-logs>");
+		for (const l of args.logs) {
+			lines.push(`\n--- Job ${l.jobName} (run ${l.runId}, job ${l.jobId}) ---`);
+			lines.push("<pre>");
+			lines.push(l.text);
+			lines.push("</pre>");
 		}
-		lines.push(`\n## Next actions\n${args.debugPrompt}`);
+		lines.push("</ci-logs>");
+	}
+	lines.push(`\n## Next actions\n${args.debugPrompt}`);
 	lines.push(`\n<sentinel:${sentinel}>`);
 	return { sentinel, text: lines.join("\n") };
 }
